@@ -16,7 +16,7 @@ import logging
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
 import wikipedia
-from ddgs import DDGS
+from tavily import TavilyClient
 
 # Türkçe Tarih Ayarı (Linux/Windows uyumlu)
 try:
@@ -42,6 +42,10 @@ class AIChat(commands.Cog):
         if not api_key:
             raise ValueError("❌ GROQ_API_KEY bulunamadı! Lütfen .env dosyanızı kontrol edin.")
         self.client = Groq(api_key=api_key)
+        
+        # Tavily Search API
+        tavily_key = os.getenv("TAVILY_API_KEY")
+        self.tavily_client = TavilyClient(api_key=tavily_key) if tavily_key else None
 
         self.cooldown_suresi = 4
         self.odaklanilan_kisiler = {}
@@ -54,26 +58,38 @@ class AIChat(commands.Cog):
         self.web_cache = {}  # {sorgu: {"result": data, "time": timestamp}}
         self.cache_ttl = 1800  # 30 dakika cache
 
-    def web_ara_duckduckgo(self, sorgu, max_results=3):
-        # Cache kontrol
-        cache_key = f"ddg_{sorgu.lower()}_{max_results}"
+    def web_ara_tavily(self, sorgu, max_results=3):
+        """Tavily API kullanarak web araması yap."""
+        if not self.tavily_client:
+            self.logger.warning("Tavily API key bulunamadı")
+            return None
+        
+        cache_key = f"tavily_{sorgu.lower()}_{max_results}"
         if cache_key in self.web_cache:
             cached = self.web_cache[cache_key]
             if time.time() - cached["time"] < self.cache_ttl:
                 return cached["result"]
         
         try:
-            ddgs = DDGS()
+            response = self.tavily_client.search(sorgu, include_answer=True)
             results = []
-            for r in ddgs.text(sorgu, region='tr-tr', safesearch='Moderate', max_results=max_results):
-                results.append(f"{r.get('title','')}: {r.get('body','')}\n{r.get('href','')}")
-                if len(results) >= max_results:
-                    break
-            result = '\n\n'.join(results) if results else None
-            self.web_cache[cache_key] = {"result": result, "time": time.time()}
-            return result
+            
+            # Tavily'den doğrudan cevap varsa onu kullan
+            if response.get("answer"):
+                results.append(response["answer"])
+            
+            # Sonuçları ekle
+            for result in response.get("results", [])[:max_results]:
+                title = result.get("title", "")
+                content = result.get("content", "")[:300]
+                url = result.get("url", "")
+                results.append(f"{title}: {content}\n{url}")
+            
+            result_text = '\n\n'.join(results) if results else None
+            self.web_cache[cache_key] = {"result": result_text, "time": time.time()}
+            return result_text
         except Exception as e:
-            self.logger.warning(f"Web arama hatası: {e}")
+            self.logger.warning(f"Tavily arama hatası: {e}")
             return None
 
     def web_ara_google(self, sorgu, max_results=3):
@@ -150,42 +166,27 @@ class AIChat(commands.Cog):
         return "\n\n".join(results) if results else None
 
     def web_ara_birlesik(self, sorgu, max_results=3):
-        # Önce Google (TR), sonra DuckDuckGo (TR), en son Selenium fallback
-        sonuc = self.web_ara_google(sorgu, max_results=max_results)
+        # Tavily ile ara, fallback olarak Wikipedia
+        sonuc = self.web_ara_tavily(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
-        sonuc = self.web_ara_duckduckgo(sorgu, max_results=max_results)
+        sonuc = self.web_ara_wikipedia(sorgu)
         if sonuc:
             return sonuc
-        return self.web_ara_selenium(sorgu, max_results=max_results)
+        return None
 
     def tr_ilk_sonuclari_getir(self, sorgu, max_results=3):
-        # Türkiye odaklı ilk sonuçları getir
-        urls = []
+        """Tavily ile arama yap ve URL'leri döndür."""
+        if not self.tavily_client:
+            return []
+        
         try:
-            from googlesearch import search
-            for url in search(sorgu, num_results=max_results, lang="tr"):
-                urls.append(url)
-                if len(urls) >= max_results:
-                    break
-        except Exception as e:
-            self.logger.warning(f"TR Google arama hatası: {e}")
-
-        if urls:
+            response = self.tavily_client.search(sorgu)
+            urls = [r.get("url") for r in response.get("results", [])[:max_results] if r.get("url")]
             return urls
-
-        try:
-            ddgs = DDGS()
-            for r in ddgs.text(sorgu, region='tr-tr', safesearch='Moderate', max_results=max_results):
-                href = r.get('href')
-                if href:
-                    urls.append(href)
-                if len(urls) >= max_results:
-                    break
         except Exception as e:
-            self.logger.warning(f"TR DuckDuckGo arama hatası: {e}")
-
-        return urls
+            self.logger.debug(f"Tavily URL getirme hatası: {e}")
+            return []
 
     def tr_ilk_siteden_ozet_selenium(self, sorgu):
         urls = self.tr_ilk_sonuclari_getir(sorgu, max_results=1)
