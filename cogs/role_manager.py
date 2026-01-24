@@ -1,14 +1,7 @@
-"""
-Dinamik Rol Yöneticisi
-- Uyarı verilen kişiye "Uyarı X" rolü verir
-- Susturulan kişiye "Susturulmuş" rolü verir
-- Yasaklanan kişiye "Yasaklı" rolü verir
-"""
-
 import discord
 from discord.ext import commands
-from utils.logger import get_logger
 from utils import db
+from utils.logger import get_logger
 
 
 class RoleManager(commands.Cog):
@@ -32,12 +25,10 @@ class RoleManager(commands.Cog):
     async def rol_oluştur_veya_bul(self, guild: discord.Guild, rol_adı: str, renk: discord.Color = None, hiyerarşi_düzeyi: int = 0):
         """Rolü var mı kontrol et, yoksa oluştur."""
         try:
-            # Var olan rolü ara
             for rol in guild.roles:
                 if rol.name.lower() == rol_adı.lower():
                     return rol
             
-            # Yoksa oluştur
             yeni_rol = await guild.create_role(
                 name=rol_adı,
                 color=renk or discord.Color.greyple(),
@@ -76,18 +67,15 @@ class RoleManager(commands.Cog):
     async def uyarı_rolleri_güncelle(self, guild: discord.Guild, member: discord.Member, uyarı_sayısı: int):
         """Uyarı sayısına göre rolleri güncelle."""
         try:
-            # Önceki uyarı rollerini kaldır
             for i in range(1, 11):  # 1-10 uyarı rolü
                 await self.rol_al(member, f"Uyarı {i}")
             
-            # Yeni uyarı rolü ver
             if uyarı_sayısı > 0:
                 if uyarı_sayısı > 10:
                     uyarı_sayısı = 10
                 
                 rol_adı = f"Uyarı {uyarı_sayısı}"
                 
-                # Renkler: Yeşil → Sarı → Kırmızı
                 if uyarı_sayısı <= 3:
                     renk = discord.Color.green()
                 elif uyarı_sayısı <= 6:
@@ -114,23 +102,15 @@ class RoleManager(commands.Cog):
         """Yasaklanan üyeye "Yasaklı" rolü ver."""
         return await self.rol_ver(member, "🚫 Yasaklı", discord.Color.darker_grey())
 
-    # --- Discord Events ---
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """
-        Üyenin timeout durumu değiştiğinde çalışır.
-        Timeout eklenirse → Susturulmuş rolü ver
-        Timeout kaldırılırsa → Susturulmuş rolü al
-        """
         if before.timed_out == after.timed_out:
             return  # Timeout değişmediyse çık
         
         if after.timed_out:
-            # Timeout eklendi → Susturulmuş rolü ver
             await self.susturulmuş_rol_ver(after.guild, after)
             self.logger.info(f"{after.name} susturuldu - Susturulmuş rolü verildi")
         else:
-            # Timeout kaldırıldı → Susturulmuş rolü al
             await self.susturulmuş_rol_al(after.guild, after)
             self.logger.info(f"{after.name} susturulması kaldırıldı - Susturulmuş rolü alındı")
 

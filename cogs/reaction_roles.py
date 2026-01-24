@@ -51,9 +51,7 @@ class ReactionRoles(commands.Cog):
             return
         
         try:
-            # Unique mode kontrolü
             if rr_data[message_key].get("unique", False):
-                # Önce bu mesajdaki diğer rolleri çıkar
                 for emoji, rid in rr_data[message_key].get("roles", {}).items():
                     if emoji != emoji_str:
                         other_role = guild.get_role(int(rid))
@@ -124,7 +122,6 @@ class ReactionRoles(commands.Cog):
         
         msg = await kanal.send(embed=embed)
         
-        # Veritabanına kaydet
         rr_data = self.get_reaction_roles(interaction.guild.id)
         message_key = f"{kanal.id}_{msg.id}"
         rr_data[message_key] = {
@@ -162,7 +159,6 @@ class ReactionRoles(commands.Cog):
         """Reaction role mesajına emoji + rol ekler."""
         rr_data = self.get_reaction_roles(interaction.guild.id)
         
-        # Mesajı bul
         message_key = None
         for key, value in rr_data.items():
             if str(value["message_id"]) == mesaj_id:
@@ -176,11 +172,9 @@ class ReactionRoles(commands.Cog):
             )
             return
         
-        # Rolü ekle
         rr_data[message_key]["roles"][emoji] = rol.id
         self.save_reaction_roles(interaction.guild.id, rr_data)
         
-        # Mesaja emoji ekle
         try:
             channel = interaction.guild.get_channel(rr_data[message_key]["channel_id"])
             message = await channel.fetch_message(int(mesaj_id))
@@ -224,7 +218,6 @@ class ReactionRoles(commands.Cog):
         del rr_data[message_key]["roles"][emoji]
         self.save_reaction_roles(interaction.guild.id, rr_data)
         
-        # Mesajdan emoji'yi kaldır
         try:
             channel = interaction.guild.get_channel(rr_data[message_key]["channel_id"])
             message = await channel.fetch_message(int(mesaj_id))

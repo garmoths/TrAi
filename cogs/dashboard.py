@@ -26,7 +26,6 @@ class Dashboard(commands.Cog):
                 return True
             veriler = self.ayar_yukle()
             guild_conf = veriler.get(str(guild.id), {})
-            # admin bypass if enabled
             if guild_conf.get("allow_admin_edit", False) and getattr(user, "guild_permissions", None) and user.guild_permissions.administrator:
                 return True
             allowed = guild_conf.get("panel_edit_roles", []) or []
@@ -50,43 +49,27 @@ class Dashboard(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Allow natural-language (Turkish) panel changes when the bot is mentioned.
-
-        Examples (Turkish):
-        - @Bot uyarı eşiğini 4 yap
-        - @Bot uyarı süresini 15 dakika yap
-        - @Bot otomatik susturmayı kapat/aç
-        - @Bot uyarı dm kapat/aç
-        - @Bot panel rol ekle @rol
-        """
-        # ignore DMs and bots
         if not message.guild or message.author.bot:
             return
 
-        # must mention bot
         if not self.bot.user.mentioned_in(message):
             return
 
-        # check permission (owner or panel editor)
         author = message.author
         if not self.can_user_edit(message.guild, author):
-            # allow owner-only reply
             try:
                 await message.channel.send("❌ Bu işlemi yapmak için panel düzenleyici olmanız veya sunucu sahibi olmanız gerekir.")
             except Exception:
                 pass
             return
 
-        # strip mention and normalize (keep original for role-name detection)
         content = message.content.replace(f"<@{self.bot.user.id}>", "").replace(f"<@!{self.bot.user.id}>", "").strip()
         lc = content.lower()
 
         import re, asyncio
 
-        # helper: convert Turkish/English number words to int (supports 0-99 approx)
         def word_to_int(s: str) -> int | None:
             s = s.strip().lower()
-            # direct digits
             m = re.search(r"(\d+)", s)
             if m:
                 return int(m.group(1))
@@ -101,7 +84,6 @@ class Dashboard(commands.Cog):
             }
             tens = {'yirmi':20,'otuz':30,'kırk':40,'kirk':40,'elli':50,'altmış':60,'altmis':60}
 
-            # try direct word maps
             if s in ones:
                 return ones[s]
             if s in teens:
@@ -109,21 +91,17 @@ class Dashboard(commands.Cog):
             if s in tens:
                 return tens[s]
 
-            # combined forms like 'yirmi bir' or 'yirmibir'
             for tword, tval in tens.items():
                 if s.startswith(tword):
                     rest = s[len(tword):].strip()
                     if not rest:
                         return tval
-                    # rest may be a ones word
                     if rest in ones:
                         return tval + ones[rest]
-                    # numeric suffix
                     mm = re.match(r"(\d+)", rest)
                     if mm:
                         return tval + int(mm.group(1))
 
-            # try splitting by space
             parts = s.split()
             total = 0
             found = False
@@ -146,7 +124,6 @@ class Dashboard(commands.Cog):
                 return total
             return None
 
-        # Helper to send ephemeral-like confirmation (message auto-deletes) and DM user
         async def confirm(text: str):
             try:
                 m = await message.channel.send(f"{message.author.mention} {text}")
@@ -156,17 +133,13 @@ class Dashboard(commands.Cog):
             except Exception:
                 pass
 
-        # 1) THRESHOLD: many variants
         m = re.search(r"(?:(uyarı\s*eşiği|eşik|threshold|limit|puan)\b.*?(\d+|[\w\s]+))|(?:\bset\b.*?\bthreshold\b.*?(\d+))|(?:\b(eşik)\s*(?:[:=])\s*(\d+|[\w\s]+))", lc)
         if m:
-            # try numeric first
             val = None
-            # capture any digits
             mm = re.search(r"(\d+)", lc)
             if mm:
                 val = int(mm.group(1))
             else:
-                # try to parse word numbers from the whole content
                 w = word_to_int(lc)
                 if w is not None:
                     val = w
@@ -183,10 +156,8 @@ class Dashboard(commands.Cog):
                 await message.channel.send("❌ Eşik ayarlanamadı.")
             return
 
-        # 2) DURATION
         m = re.search(r"(uyarı\s*süresi|süre|duration)\s*(?:[:=\s]*)?(\d+|[\w\s]+)\s*(dakika|dk)?", lc)
         if m:
-            # try digits then words
             mm = re.search(r"(\d+)", lc)
             if mm:
                 val = int(mm.group(1))
@@ -206,7 +177,6 @@ class Dashboard(commands.Cog):
                 await message.channel.send("❌ Süre ayarlanamadı.")
             return
 
-        # 3) ENABLE/DISABLE auto mute
         if re.search(r"otomatik\s*sustur|otomatik\s*susturma|auto[- ]?mute|otomatik", lc):
             if re.search(r"kapat|devre\s*dışı|pasif|kapalı|off|disable", lc):
                 veriler = self.ayar_yukle()
@@ -221,7 +191,6 @@ class Dashboard(commands.Cog):
                 await confirm("✅ Otomatik susturma açıldı.")
                 return
 
-        # 4) DM toggle
         if re.search(r"\b(dm|mesaj|uyarı\s*dm|uyarı\s*mesaj)\b", lc):
             if re.search(r"kapat|devre\s*dışı|kapalı|off|disable", lc):
                 veriler = self.ayar_yukle()
@@ -236,14 +205,12 @@ class Dashboard(commands.Cog):
                 await confirm("✅ Uyarı DM'leri açıldı.")
                 return
 
-        # 5) panel role add/remove via mention or role name
         m = re.search(r"panel\s+rol\s+ekle\s+(?:<@&?(\d+)>|@?([\w\sĞÜŞİÖÇğüşıöç-]+))", message.content)
         if m:
             rid = None
             if m.group(1):
                 rid = int(m.group(1))
             else:
-                # search by name
                 name = (m.group(2) or "").strip()
                 for r in message.guild.roles:
                     if r.name.lower() == name.lower():
@@ -295,7 +262,6 @@ class Dashboard(commands.Cog):
                 await message.channel.send("❌ Rol kaldırılamadı.")
             return
 
-        # fallback: personalized help in channel + DM the user, and show ephemeral-like hint
         try:
             hint = (
                 "Merhaba! Sanırım isteğinizi anlayamadım. Doğal dil komut örnekleri:\n"
@@ -305,7 +271,6 @@ class Dashboard(commands.Cog):
                 "• `@Bot uyarı dm kapat` veya `aç`\n"
                 "• `@Bot panel rol ekle @Rol` veya `panel rol sil @Rol`\n"
                 "Yapmak istediğiniz işlemi bu örneklere benzeterek tekrar yazabilirsiniz.")
-            # channel personalized message (not persistent)
             ch_msg = await message.channel.send(f"{message.author.mention} {hint}")
             asyncio.create_task(self._delayed_delete(ch_msg, 18))
         except Exception:
@@ -385,7 +350,6 @@ class DashboardView(discord.ui.View):
 
     def butonlari_guncelle(self):
         self.clear_items()
-        # Header: Moderasyon
         hdr_mod = discord.ui.Button(label="— Moderasyon —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_mod)
 
@@ -423,7 +387,6 @@ class DashboardView(discord.ui.View):
         btn_dm.callback = self.create_toggle_callback("send_warn_dm", "Uyarı DM")
         self.add_item(btn_dm)
 
-        # Header: Çekiliş
         hdr_give = discord.ui.Button(label="— Çekiliş —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_give)
         btn_give = discord.ui.Button(label="Çekiliş Komutları", style=discord.ButtonStyle.secondary, custom_id="giveaway_help", emoji="🎉")
@@ -435,7 +398,6 @@ class DashboardView(discord.ui.View):
         btn_give.callback = give_cb
         self.add_item(btn_give)
 
-        # Header: Bilet
         hdr_ticket = discord.ui.Button(label="— Bilet (Ticket) —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_ticket)
         btn_ticket = discord.ui.Button(label="Bilet Komutları", style=discord.ButtonStyle.secondary, custom_id="ticket_help", emoji="🎫")
@@ -447,7 +409,6 @@ class DashboardView(discord.ui.View):
         btn_ticket.callback = ticket_cb
         self.add_item(btn_ticket)
 
-        # Header: Sohbet
         hdr_chat = discord.ui.Button(label="— Sohbet —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_chat)
 
@@ -462,7 +423,6 @@ class DashboardView(discord.ui.View):
             btn.callback = self.create_callback(key, label)
             self.add_item(btn)
 
-        # Komut Ayarları (Sohbet altında)
         hdr_cmds = discord.ui.Button(label="— Komut Ayarları —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_cmds)
 
@@ -508,7 +468,6 @@ class DashboardView(discord.ui.View):
             select.callback = sel_callback
             self.add_item(select)
 
-        # Header: Yardım & Sıfırlama
         hdr_help = discord.ui.Button(label="— Yardım & Sıfırlama —", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(hdr_help)
 
@@ -629,7 +588,6 @@ class DashboardView(discord.ui.View):
 
     def create_callback(self, key, label):
         async def callback(interaction: discord.Interaction):
-            # only owner or allowed panel editors can interact
             guild = self.cog.bot.get_guild(int(self.guild_id))
             if not self.cog.can_user_edit(guild, interaction.user):
                 await interaction.response.send_message("❌ Bu paneli düzenleme yetkiniz yok.", ephemeral=True)
@@ -688,7 +646,6 @@ class SettingsModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # take first child value
             val = self.children[0].value.strip()
             num = int(val)
         except Exception:
@@ -701,8 +658,6 @@ class SettingsModal(discord.ui.Modal):
                 veriler[self.guild_id] = {}
             veriler[self.guild_id][self.key] = num
             self.cog.ayar_kaydet(veriler)
-            # refresh view if message exists
-            # find the previous message and update view - interaction.message is the modal trigger message
             await interaction.response.send_message(f"✅ Ayar kaydedildi: {num}", ephemeral=True)
         except Exception:
             self.cog.logger.exception("Ayar modalı kaydedilemedi")
@@ -721,7 +676,6 @@ class CommandSettingsView(discord.ui.View):
         if "commands" not in self.veriler[self.guild_id]:
             self.veriler[self.guild_id]["commands"] = {}
         if self.command_name not in self.veriler[self.guild_id]["commands"]:
-            # defaults
             self.veriler[self.guild_id]["commands"][self.command_name] = {
                 "enabled": True,
                 "send_dm": True,
@@ -747,14 +701,12 @@ class CommandSettingsView(discord.ui.View):
         btn_edit.callback = self.open_edit_modal
         self.add_item(btn_edit)
 
-        # summary button (disabled) to show current custom text length
         txt = self.cmd_conf.get("custom_text", "")
         info = discord.ui.Button(label=f"Metin: {len(txt)} karakter", style=discord.ButtonStyle.gray, disabled=True)
         self.add_item(info)
 
     async def toggle_enable(self, interaction: discord.Interaction):
         try:
-            # permission check
             guild = self.cog.bot.get_guild(int(self.guild_id))
             if not self.cog.can_user_edit(guild, interaction.user):
                 await interaction.response.send_message("❌ Bu komutu düzenleme yetkiniz yok.", ephemeral=True)
@@ -802,7 +754,6 @@ class CommandTextModal(discord.ui.Modal):
         self.cog = cog
         self.guild_id = guild_id
         self.command_name = command_name
-        # current value
         veriler = self.cog.ayar_yukle()
         cur = ""
         if guild_id in veriler and "commands" in veriler[guild_id] and command_name in veriler[guild_id]["commands"]:
@@ -849,9 +800,7 @@ class ResetConfirmModal(discord.ui.Modal):
             self.cog.logger.exception("Varsayılan sıfırlama başarısız")
             await interaction.response.send_message("❌ Sıfırlama sırasında hata oluştu.", ephemeral=True)
 
-    # =========================================================================
-    # SLASH KOMUTLAR (Discord / Menüsü için)
-    # =========================================================================
+
 
     @app_commands.command(name="panel", description="🎛️ Sunucu ayar panelini açar (moderasyon, çekiliş, bilet, sohbet)")
     @app_commands.checks.has_permissions(administrator=True)
@@ -886,7 +835,6 @@ class ResetConfirmModal(discord.ui.Modal):
         
         embed = discord.Embed(title="⚙️ Sunucu Ayarları", color=discord.Color.green())
         
-        # Moderasyon
         mod_text = []
         mod_text.append(f"🔗 Link Engel: {'✅ Açık' if guild_conf.get('link_engel') else '❌ Kapalı'}")
         mod_text.append(f"🔠 Caps Engel: {'✅ Açık' if guild_conf.get('caps_engel') else '❌ Kapalı'}")
@@ -896,7 +844,6 @@ class ResetConfirmModal(discord.ui.Modal):
         mod_text.append(f"⏱️ Uyarı Süresi: {guild_conf.get('auto_mute_minutes', 10)} dakika")
         embed.add_field(name="🛡️ Moderasyon", value="\n".join(mod_text), inline=False)
         
-        # Sohbet
         chat_text = []
         hosg_msg = guild_conf.get('hosgeldin_mesaji', 'Varsayılan')
         if len(hosg_msg) > 50:

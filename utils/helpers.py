@@ -38,7 +38,6 @@ def strip_emojis(text: str) -> str:
 	if not text:
 		return text
 	try:
-		# Wide ranges that cover most emoji/pictographs
 		import re
 		emoji_pattern = re.compile(
 			"["
@@ -60,7 +59,6 @@ def strip_emojis(text: str) -> str:
 	except Exception:
 		return text
 
-# --- Recent message dedupe helpers ---
 _recent_msgs = set()
 
 def is_recent_message(msg_id: int) -> bool:
@@ -84,6 +82,4 @@ def mark_recent_message(msg_id: int, ttl: int = 5):
 		loop = asyncio.get_running_loop()
 		loop.create_task(_clear())
 	except RuntimeError:
-		# No running loop (e.g., during sync init) — schedule nothing
 		pass
-

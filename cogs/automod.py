@@ -15,15 +15,12 @@ class AutoMod(commands.Cog):
         self.bot = bot
         self.logger = get_logger(__name__)
         
-        # Anti-spam tracking
         self.message_cache = defaultdict(list)  # {user_id: [(message, timestamp), ...]}
         self.spam_violations = defaultdict(int)  # {user_id: violation_count}
         
-        # Anti-raid tracking
         self.join_cache = []  # [(user_id, timestamp), ...]
         self.raid_mode = {}  # {guild_id: bool}
         
-        # Mass mention tracking
         self.mention_violations = defaultdict(int)
 
     def get_automod_settings(self, guild_id):
@@ -49,7 +46,6 @@ class AutoMod(commands.Cog):
         if message.author.bot or not message.guild:
             return
         
-        # Yetkililer muaf
         if message.author.guild_permissions.manage_messages:
             return
         
@@ -61,20 +57,16 @@ class AutoMod(commands.Cog):
         user_id = message.author.id
         current_time = time.time()
         
-        # Eski mesajları temizle
         self.message_cache[user_id] = [
             (msg, ts) for msg, ts in self.message_cache[user_id]
             if current_time - ts < settings["spam_interval"]
         ]
         
-        # Yeni mesaj ekle
         self.message_cache[user_id].append((message, current_time))
         
-        # Spam kontrolü
         if len(self.message_cache[user_id]) >= settings["spam_threshold"]:
             self.spam_violations[user_id] += 1
             
-            # Mesajları sil
             try:
                 for msg, _ in self.message_cache[user_id]:
                     try:
@@ -84,7 +76,6 @@ class AutoMod(commands.Cog):
             except:
                 pass
             
-            # Uyarı veya ceza
             if self.spam_violations[user_id] == 1:
                 try:
                     await message.channel.send(
@@ -108,7 +99,6 @@ class AutoMod(commands.Cog):
             
             self.message_cache[user_id].clear()
         
-        # Mass mention kontrolü
         if settings["anti_mass_mention"]:
             mention_count = len(message.mentions)
             if mention_count >= settings["mention_threshold"]:
@@ -139,30 +129,24 @@ class AutoMod(commands.Cog):
         
         current_time = time.time()
         
-        # Eski join'leri temizle
         self.join_cache = [
             (uid, ts) for uid, ts in self.join_cache
             if current_time - ts < settings["raid_interval"]
         ]
         
-        # Yeni join ekle
         self.join_cache.append((member.id, current_time))
         
-        # Raid kontrolü
         if len(self.join_cache) >= settings["raid_threshold"]:
-            # RAID DETECTED!
             guild = member.guild
             
             if guild.id not in self.raid_mode or not self.raid_mode[guild.id]:
                 self.raid_mode[guild.id] = True
                 
-                # Verification level yükselt
                 try:
                     await guild.edit(verification_level=discord.VerificationLevel.high)
                 except:
                     pass
                 
-                # Log kanalına bildir
                 log_settings = db.kv_get("settings", {}) or {}
                 log_channel_id = log_settings.get(str(guild.id), {}).get("log_kanali")
                 
@@ -178,17 +162,12 @@ class AutoMod(commands.Cog):
                         embed.set_footer(text="Raid Mode: ACTIVE")
                         await log_channel.send(embed=embed)
         
-        # Auto-dehoist
         if settings["auto_dehoist"]:
             if member.display_name.startswith("!") or member.display_name.startswith("?"):
                 try:
                     await member.edit(nick="Dehoist", reason="Otomatik: Dehoist")
                 except:
                     pass
-
-    # =========================================================================
-    # SLASH KOMUTLAR
-    # =========================================================================
 
     @app_commands.command(name="anti-spam", description="🛡️ Anti-spam sistemini açar/kapatır")
     @app_commands.checks.has_permissions(administrator=True)
@@ -300,7 +279,6 @@ class AutoMod(commands.Cog):
             color=discord.Color.blue()
         )
         
-        # Anti-spam
         spam_status = "✅ Açık" if settings["anti_spam"] else "❌ Kapalı"
         embed.add_field(
             name="🛡️ Anti-Spam",
@@ -308,7 +286,6 @@ class AutoMod(commands.Cog):
             inline=True
         )
         
-        # Anti-raid
         raid_status = "✅ Açık" if settings["anti_raid"] else "❌ Kapalı"
         raid_mode_active = "🚨 AKTIF" if self.raid_mode.get(interaction.guild.id) else "🟢 Normal"
         embed.add_field(
@@ -317,7 +294,6 @@ class AutoMod(commands.Cog):
             inline=True
         )
         
-        # Mass mention
         mention_status = "✅ Açık" if settings["anti_mass_mention"] else "❌ Kapalı"
         embed.add_field(
             name="👥 Anti Mass-Mention",
@@ -325,7 +301,6 @@ class AutoMod(commands.Cog):
             inline=True
         )
         
-        # Auto-dehoist
         dehoist_status = "✅ Açık" if settings["auto_dehoist"] else "❌ Kapalı"
         embed.add_field(
             name="🔧 Auto-Dehoist",

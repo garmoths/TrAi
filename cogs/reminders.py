@@ -52,7 +52,6 @@ class Reminders(commands.Cog):
                             self.logger.error(f"Hatırlatma gönderme hatası: {e}")
                             to_remove.append(reminder_id)
                 
-                # Tamamlananları sil
                 for reminder_id in to_remove:
                     reminders.pop(reminder_id, None)
                 
@@ -76,7 +75,6 @@ class Reminders(commands.Cog):
         mesaj: str
     ):
         """Hatırlatma kurar."""
-        # Süreyi parse et
         try:
             amount = int(süre[:-1])
             unit = süre[-1].lower()
@@ -127,7 +125,6 @@ class Reminders(commands.Cog):
         
         db.kv_set("reminders", reminders)
         
-        # Süreyi formatla
         if unit == 's':
             time_str = f"{amount} saniye"
         elif unit == 'm':

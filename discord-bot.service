@@ -1,0 +1,16 @@
+[Unit]
+Description=Discord Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/DiscordBotAi
+Environment="PATH=/root/DiscordBotAi/.venv/bin"
+EnvironmentFile=/root/DiscordBotAi/.env
+ExecStart=/root/DiscordBotAi/.venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

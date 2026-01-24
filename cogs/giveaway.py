@@ -22,7 +22,6 @@ class Giveaway(commands.Cog):
         self.bot.loop.create_task(self.veritabani_yukle())
         self.logger = get_logger(__name__)
 
-    # --- VERİTABANI İŞLEMLERİ ---
     def kaydet(self):
         data = {}
         for cid, v in self.aktif_cekilisler.items():
@@ -72,7 +71,6 @@ class Giveaway(commands.Cog):
             self.logger.exception("Giveaway veritabanı okunamadı")
             pass
 
-    # --- BUTON ---
     class CekilisButonu(discord.ui.View):
         def __init__(self, sure_saniye, embed, rol_sarti=None):
             super().__init__(timeout=None)
@@ -114,7 +112,6 @@ class Giveaway(commands.Cog):
                 cog = interaction.client.get_cog("Giveaway")
                 if cog: cog.kaydet()
 
-    # --- YARDIMCI ---
     def sure_hesapla(self, metin):
         zaman_regex = re.search(r'(\d+(?:[.,]\d+)?)\s*(saniye|sn|s|dakika|dk|m|saat|sa|h|gün|g|d)', metin)
         if not zaman_regex: return 0
@@ -135,7 +132,6 @@ class Giveaway(commands.Cog):
         if bul: return int(bul.group(1))
         return 1
 
-    # --- BİTİRME ---
     async def cekilisi_bitir(self, cid, channel):
         if cid not in self.aktif_cekilisler: return
         data = self.aktif_cekilisler[cid]
@@ -174,7 +170,6 @@ class Giveaway(commands.Cog):
         await asyncio.sleep(saniye)
         if cid in self.aktif_cekilisler: await self.cekilisi_bitir(cid, channel)
 
-    # --- ANA DİNLEYİCİ ---
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
@@ -183,8 +178,6 @@ class Giveaway(commands.Cog):
         if not message.author.guild_permissions.manage_messages: return
         icerik = message.content.lower()
 
-        # 🔥 YENİ EKLENEN FİLTRE: SORU SORUYORSA GİRME!
-        # "Çekiliş nasıl açarım?" dediğinde burası çalışmayacak.
         soru_kelimeleri = ["nasıl", "nedir", "ne zaman", "kim", "mi", "mu", "mı", "?"]
         if any(s in icerik for s in soru_kelimeleri):
             return  # Soru soruyor, bırak AI cevaplasın.
@@ -203,13 +196,11 @@ class Giveaway(commands.Cog):
                 mark_recent_message(message.id)
             return
 
-        # BAŞLATMA
         tetikleyiciler = ["yap", "başlat", "aç", "oluştur"]
         if "çekiliş" in icerik and any(t in icerik for t in tetikleyiciler) and "yeniden" not in icerik:
 
             saniye = self.sure_hesapla(icerik)
             if not saniye:
-                # Soru filtresi yukarıda olduğu için, buraya gelmişse gerçekten komut denemiştir.
                 await message.channel.send(
                     embed=discord.Embed(title="❌ Hata", description="Süre belirtmedin! Örn: `10dk`, `1saat`",
                                         color=discord.Color.red()))
@@ -253,10 +244,6 @@ class Giveaway(commands.Cog):
             }
             self.kaydet()
 
-    # =========================================================================
-    # SLASH KOMUTLAR
-    # =========================================================================
-
     @app_commands.command(name="çekiliş-başlat", description="🎉 Çekiliş başlatır")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(
@@ -266,7 +253,6 @@ class Giveaway(commands.Cog):
     )
     async def cekilis_baslat_slash(self, interaction: discord.Interaction, süre: str, ödül: str, kazanan_sayısı: int = 1):
         """Slash komut ile çekiliş başlatır."""
-        # Süre parsing
         match = re.match(r'(\d+)\s*([smhd])', süre.lower())
         if not match:
             await interaction.response.send_message("❌ Geçersiz süre formatı! Örnek: `1m`, `30s`, `2h`", ephemeral=True)

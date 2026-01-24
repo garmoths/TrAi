@@ -7,7 +7,6 @@ from utils.logger import get_logger
 
 GUIDE_FILE = "guide.json"
 
-# Kategori emojileri
 CATEGORY_EMOJIS = {
     "genel": "⚙️",
     "çekiliş": "🎉",
@@ -30,7 +29,6 @@ class KilavuzButtons(ui.View):
         self.kilavuz_data = kilavuz_data
         self.kategori_listesi = list(kilavuz_data.keys())
         
-        # Butonlar ekle
         for kategori, _ in kilavuz_data.items():
             emoji = CATEGORY_EMOJIS.get(kategori, "📖")
             button = ui.Button(
@@ -39,7 +37,6 @@ class KilavuzButtons(ui.View):
                 custom_id=f"guide_{kategori}",
                 style=discord.ButtonStyle.primary
             )
-            # Lambda ile kategoriyi yakala ve callback'e geç
             button.callback = lambda interaction, k=kategori: self.kategori_secimi(interaction, k)
             self.add_item(button)
     
@@ -93,7 +90,6 @@ class Guide(commands.Cog):
             )
             return
         
-        # Eğer kategori belirtilmişse o kategoriyi göster
         if kategori:
             if kategori not in kilavuz_data:
                 kategoriler = ", ".join(kilavuz_data.keys())
@@ -114,14 +110,12 @@ class Guide(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        # Ana kılavuz görünümü - tüm kategorileri butonlarla göster
         embed = discord.Embed(
             title="📚 TrAI Kullanım Kılavuzu",
             description="Lütfen aşağıdaki kategorilerden birini seçerek detaylı bilgi alın.",
             color=discord.Color.blue()
         )
         
-        # Kategori listesi
         kategori_metni = "\n".join([
             f"{CATEGORY_EMOJIS.get(kat, '📖')} **{kat.upper()}**"
             for kat in kilavuz_data.keys()
