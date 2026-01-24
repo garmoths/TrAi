@@ -466,15 +466,9 @@ class AIChat(commands.Cog):
 
                 wiki_ozet = self.web_ara_wikipedia(user_input) if need_wiki else None
                 web_sonuclari = None
-                if not wiki_ozet:
-                    # Türkiye odaklı ilk sonuçtan Selenium ile özet çek
-                    web_sonuclari = await self.tr_ilk_siteden_ozet_selenium_async(user_input)
-                    if not web_sonuclari and need_web:
-                        # En son global DuckDuckGo fallback
-                        try:
-                            web_sonuclari = self.web_ara_duckduckgo(user_input, max_results=3)
-                        except Exception:
-                            web_sonuclari = None
+                if not wiki_ozet and need_web:
+                    # Tavily API ile arama yap
+                    web_sonuclari = self.web_ara_tavily(user_input, max_results=3)
                 
                 # Kur bilgisi AI'ya ek bilgi olarak verilecek
                 kur_bilgi = None
