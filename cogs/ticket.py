@@ -5,6 +5,8 @@ import io
 import datetime
 import json
 import os
+from utils.helpers import is_recent_message, mark_recent_message, safe_load_json
+from utils.logger import get_logger
 
 SETTINGS_FILE = "settings.json"
 
@@ -12,11 +14,15 @@ SETTINGS_FILE = "settings.json"
 class Ticket(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.logger = get_logger(__name__)
 
     def ayar_getir(self, guild_id):
-        if not os.path.exists(SETTINGS_FILE): return {}
-        with open(SETTINGS_FILE, "r") as f:
-            return json.load(f).get(str(guild_id), {})
+        data = safe_load_json(SETTINGS_FILE, {})
+        try:
+            return data.get(str(guild_id), {})
+        except Exception:
+            self.logger.exception("Ayar getirilemedi")
+            return {}
 
     # --- 1. GİRİŞ BUTONU ---
     class TicketCreateView(discord.ui.View):
@@ -57,7 +63,7 @@ class Ticket(commands.Cog):
             # Yönetici Paneli Butonlarını Ekliyoruz
             await channel.send(embed=embed, view=Ticket.TicketControlView())
 
-    # --- 2. YÖNETİM PANELİ (YENİ ÖZELLİKLER) ---
+    # --- 2. YÖNETİM PANELİ (GELİŞTİRİLMİŞ) ---
     class TicketControlView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
@@ -67,11 +73,11 @@ class Ticket(commands.Cog):
         async def close_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.send_message("❓ Emin misin?", view=Ticket.TicketConfirmView(), ephemeral=True)
 
-        # B) CLAIM (ÜSTLENME) BUTONU - YENİ!
+        # B) CLAIM (ÜSTLENME) BUTONU
         @discord.ui.button(label="İlgileniyorum", style=discord.ButtonStyle.green, emoji="🙋‍♂️",
                            custom_id="ticket_claim_btn")
         async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Sadece yetkililer basabilir (Basit kontrol: Manage Channels yetkisi)
+            # Sadece yetkililer basabilir
             if not interaction.user.guild_permissions.manage_channels:
                 await interaction.response.send_message("⛔ Bunu sadece yetkililer yapabilir.", ephemeral=True)
                 return
@@ -86,14 +92,14 @@ class Ticket(commands.Cog):
             embed.set_footer(text=f"Yetkili: {interaction.user.name} | İlgileniyor 🛠️",
                              icon_url=interaction.user.display_avatar.url)
 
-            button.disabled = True  # Butonu kilitle ki başkası basmasın
+            button.disabled = True  # Butonu kilitle
             button.label = f"Üstlenildi ({interaction.user.name})"
 
             await interaction.message.edit(embed=embed, view=self)
             await interaction.response.send_message(
                 f"✅ {interaction.user.mention} bu talebi üstlendi! Diğer yetkililer, lütfen araya girmeyin.")
 
-        # C) PING (ÇAĞIRMA) BUTONU - YENİ!
+        # C) PING (ÇAĞIRMA) BUTONU
         @discord.ui.button(label="Ses Ver", style=discord.ButtonStyle.secondary, emoji="🔔", custom_id="ticket_ping_btn")
         async def ping_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
             # Kanal sahibini bul
@@ -101,8 +107,26 @@ class Ticket(commands.Cog):
                 user_id = int(interaction.channel.topic)
                 await interaction.channel.send(f"🔔 <@{user_id}>, yetkili seni bekliyor! Lütfen cevap ver.")
                 await interaction.response.send_message("Bildirim gönderildi.", ephemeral=True)
-            except:
+            except Exception as e:
+                cog = interaction.client.get_cog("Ticket")
+                if cog:
+                    cog.logger.debug("Ticket ping failed: %s", e)
                 await interaction.response.send_message("Kullanıcı bulunamadı.", ephemeral=True)
+        
+        # D) TRANSKRİPT KAYDET BUTONU - YENİ!
+        @discord.ui.button(label="Transcript", style=discord.ButtonStyle.secondary, emoji="📄", custom_id="ticket_transcript_btn")
+        async def transcript_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.defer(ephemeral=True)
+            
+            channel = interaction.channel
+            transcript = f"--- TICKET: {channel.name} ---\nKaydeden: {interaction.user.name}\nTarih: {datetime.datetime.now()}\n\n"
+            
+            messages = [msg async for msg in channel.history(limit=500, oldest_first=True)]
+            for msg in messages:
+                transcript += f"[{msg.created_at.strftime('%H:%M:%S')}] {msg.author.name}: {msg.content}\n"
+            
+            f = discord.File(io.BytesIO(transcript.encode("utf-8")), filename=f"{channel.name}.txt")
+            await interaction.followup.send("📄 Transcript kayıt edildi:", file=f, ephemeral=True)
 
     # --- 3. ONAY VE LOGLAMA (Aynı Kalıyor) ---
     class TicketConfirmView(discord.ui.View):
@@ -130,8 +154,8 @@ class Ticket(commands.Cog):
                     log_ch = interaction.guild.get_channel(ayarlar["log_kanali"])
                     f_copy = discord.File(io.BytesIO(transcript.encode("utf-8")), filename=f"{channel.name}.txt")
                     await log_ch.send(f"🎫 **{channel.name}** kapatıldı.", file=f_copy)
-            except:
-                pass
+            except Exception as e:
+                self.logger.exception("Failed to log ticket transcript: %s", e)
 
             await asyncio.sleep(2)
             await channel.delete()
@@ -140,6 +164,7 @@ class Ticket(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
+        if is_recent_message(message.id): return
         if not self.bot.user.mentioned_in(message): return
         if not message.author.guild_permissions.administrator: return
 
@@ -147,6 +172,7 @@ class Ticket(commands.Cog):
             embed = discord.Embed(title="🎫 Destek", description="Destek almak için butona tıkla.",
                                   color=discord.Color.blue())
             await message.channel.send(embed=embed, view=self.TicketCreateView())
+            mark_recent_message(message.id)
             await message.delete()
 
     @commands.Cog.listener()

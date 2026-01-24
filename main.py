@@ -1,48 +1,63 @@
-from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import os
 import sys
-import subprocess
 from dotenv import load_dotenv
+from utils.logger import setup_logging, get_logger
+from utils import db
 
 
-# --- 1. OTO-YÜKLEYİCİ ---
-def install_package(package):
-    print(f"🔧 OTO-TAMİR: '{package}' eksik, yükleniyor...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-    print(f"✅ '{package}' yüklendi! Bot yeniden başlatılıyor...")
-    os.execv(sys.executable, ['python'] + sys.argv)
-
-required_packages = ["discord.py", "groq", "googlesearch-python", "requests", "beautifulsoup4", "easy-pil"]
+# --- 1. DEPENDENCY CHECK (safer) ---
+missing_pkgs = []
 try:
     import discord
+except ImportError:
+    missing_pkgs.append("discord.py")
+try:
     from groq import Groq
+except ImportError:
+    missing_pkgs.append("groq")
+try:
     from googlesearch import search
+except ImportError:
+    missing_pkgs.append("googlesearch-python")
+try:
     import requests
+except ImportError:
+    missing_pkgs.append("requests")
+try:
     from bs4 import BeautifulSoup
+except ImportError:
+    missing_pkgs.append("beautifulsoup4")
+try:
     from easy_pil import Editor
-except ImportError as e:
-    missing_pkg = str(e).split("'")[-2]
-    if missing_pkg == "googlesearch": missing_pkg = "googlesearch-python"
-    if missing_pkg == "PIL": missing_pkg = "pillow"
-    if missing_pkg == "bs4": missing_pkg = "beautifulsoup4"
-    install_package(missing_pkg)
+except ImportError:
+    missing_pkgs.append("easy-pil")
+
+if missing_pkgs:
+    print("❌ Eksik paket(ler) tespit edildi:", ", ".join(missing_pkgs))
+    print("Lütfen aşağıdaki komutu çalıştırın ve tekrar deneyin:")
+    print("python -m pip install -r requirements.txt")
+    import sys
+    sys.exit(1)
 
 # --- 2. AYARLAR ---
+
 load_dotenv()
+setup_logging()
+logger = get_logger(__name__)
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# 🔥 İŞTE EKSİK OLAN PARÇA BU! 🔥
-bot.ai_aktif = True  # Bot varsayılan olarak KONUŞUR durumda başlasın.
+# Bot varsayılan olarak konuşma aktif
+bot.ai_aktif = True
 
 # --- 3. BOT OLAYLARI ---
 @bot.event
 async def on_ready():
-    print(f'{bot.user} olarak giriş yapıldı!')
+    logger.info(f'{bot.user} olarak giriş yapıldı!')
 
     # Botun durumu: "Oynuyor: @TrAI yardım | v3.0"
     await bot.change_presence(
@@ -50,16 +65,27 @@ async def on_ready():
     )
 
     for filename in os.listdir("./cogs"):
-        if filename.endswith(".py"):
-            if filename == "__init__.py": continue
+        if filename.endswith(".py") and filename != "__init__.py" and filename != "readme.py":
+            ext_name = f"cogs.{filename[:-3]}"
+            if ext_name in bot.extensions:
+                logger.info(f"   ⏩ Zaten yüklü: {filename}")
+                continue
             try:
-                await bot.load_extension(f"cogs.{filename[:-3]}")
-                print(f"   ➕ Yüklendi: {filename}")
+                await bot.load_extension(ext_name)
+                logger.info(f"   ➕ Yüklendi: {filename}")
             except Exception as e:
-                print(f"   ❌ HATA - {filename} yüklenemedi: {e}")
+                logger.exception(f"   ❌ HATA - {filename} yüklenemedi:")
+
+    # Slash komutları Discord'a sync et (cog'lar yüklendikten sonra)
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"✅ {len(synced)} slash komut Discord'a senkronize edildi!")
+    except Exception as e:
+        logger.error(f"❌ Slash komut sync hatası: {e}")
 
 if __name__ == "__main__":
+    db.init_db()
     if not TOKEN:
-        print("❌ HATA: .env dosyasında DISCORD_TOKEN bulunamadı!")
+        logger.error("❌ HATA: .env dosyasında DISCORD_TOKEN bulunamadı!")
     else:
         bot.run(TOKEN)

@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 import json
 import os
+from utils.helpers import safe_load_json, safe_write_json
+from utils.logger import get_logger
 
 SETTINGS_FILE = "settings.json"
 
@@ -9,15 +11,16 @@ SETTINGS_FILE = "settings.json"
 class Management(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.logger = get_logger(__name__)
 
     def ayar_yukle(self):
-        if not os.path.exists(SETTINGS_FILE): return {}
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return safe_load_json(SETTINGS_FILE, {})
 
     def ayar_kaydet(self, veri):
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(veri, f, indent=4)
+        try:
+            safe_write_json(SETTINGS_FILE, veri)
+        except Exception:
+            self.logger.exception("Ayar kaydetme hatası")
 
     # 🗣️ KANAL AYARLAMA
     @commands.Cog.listener()

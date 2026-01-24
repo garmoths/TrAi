@@ -3,6 +3,8 @@ from discord.ext import commands
 import datetime
 import json
 import os
+from utils import db
+from utils.logger import get_logger
 
 SETTINGS_FILE = "settings.json"
 
@@ -10,24 +12,20 @@ SETTINGS_FILE = "settings.json"
 class Logger(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.logger = get_logger(__name__)
 
     def ayar_getir(self, guild_id):
-        if not os.path.exists(SETTINGS_FILE): return {}
-        with open(SETTINGS_FILE, "r") as f:
-            return json.load(f).get(str(guild_id), {})
+        data = db.kv_get("settings", {}) or {}
+        return data.get(str(guild_id), {})
 
     def ayar_kaydet(self, guild_id, kanal_id):
-        if not os.path.exists(SETTINGS_FILE):
-            data = {}
-        else:
-            with open(SETTINGS_FILE, "r") as f:
-                data = json.load(f)
-
+        data = db.kv_get("settings", {}) or {}
         if str(guild_id) not in data: data[str(guild_id)] = {}
         data[str(guild_id)]["log_kanali"] = kanal_id
-
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+        try:
+            db.kv_set("settings", data)
+        except Exception:
+            self.logger.exception("Log ayarı kaydedilemedi")
 
     # 🗣️ LOG KANALINI AYARLAMA (Doğal Dil)
     @commands.Cog.listener()
