@@ -33,11 +33,9 @@ class AutoRoles(commands.Cog):
         if not settings["enabled"]:
             return
         
-        # Delay varsa bekle
         if settings["delay"] > 0:
             await asyncio.sleep(settings["delay"])
         
-        # Bot mu kontrol et
         if member.bot:
             role_ids = settings["bot_roles"]
         else:
@@ -46,7 +44,6 @@ class AutoRoles(commands.Cog):
         if not role_ids:
             return
         
-        # Rolleri ver
         for role_id in role_ids:
             role = member.guild.get_role(int(role_id))
             if role:
@@ -187,7 +184,6 @@ class AutoRoles(commands.Cog):
         embed.add_field(name="Durum", value=status, inline=True)
         embed.add_field(name="Gecikme", value=f"{settings['delay']} saniye", inline=True)
         
-        # Normal roller
         normal_roles = []
         for role_id in settings["roles"]:
             role = interaction.guild.get_role(role_id)
@@ -201,7 +197,6 @@ class AutoRoles(commands.Cog):
                 inline=False
             )
         
-        # Bot rolleri
         bot_roles = []
         for role_id in settings["bot_roles"]:
             role = interaction.guild.get_role(role_id)

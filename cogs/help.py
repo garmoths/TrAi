@@ -15,7 +15,6 @@ class Help(commands.Cog):
         from utils import db
         return db.kv_get("guide", {}) or {}
 
-    # --- MENÜ SİSTEMİ (Detaylı Kılavuz İçin) ---
     class HelpSelect(discord.ui.Select):
         def __init__(self, data):
             self.data = data
@@ -50,7 +49,6 @@ class Help(commands.Cog):
             super().__init__()
             self.add_item(Help.HelpSelect(data))
 
-    # --- ANA DİNLEYİCİ ---
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
@@ -60,7 +58,6 @@ class Help(commands.Cog):
 
         icerik = message.content.lower()
 
-        # 1. DURUM: HIZLI KOMUT LİSTESİ İSTERSE ("komutlar")
         if "komutlar" in icerik or "komut listesi" in icerik or "liste" in icerik:
             embed = discord.Embed(
                 title="🤖 TrAI Hızlı Komut Paneli",
@@ -91,7 +88,6 @@ class Help(commands.Cog):
             mark_recent_message(message.id)
             return
 
-        # 2. DURUM: DETAYLI KILAVUZ İSTERSE ("kılavuz", "yardım")
         if "yardım" in icerik or "kılavuz" in icerik or "help" in icerik:
             data = self.kilavuz_oku()
             embed = discord.Embed(

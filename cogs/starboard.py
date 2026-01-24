@@ -51,11 +51,9 @@ class Starboard(commands.Cog):
         except:
             return
         
-        # Self-star kontrolü
         if not settings["self_star"] and message.author.id == payload.user_id:
             return
         
-        # Reaction sayısını kontrol et
         star_count = 0
         for reaction in message.reactions:
             if str(reaction.emoji) == settings["emoji"]:
@@ -65,17 +63,14 @@ class Starboard(commands.Cog):
         if star_count < settings["threshold"]:
             return
         
-        # Starboard kanalını al
         starboard_channel = guild.get_channel(settings["channel_id"])
         if not starboard_channel:
             return
         
-        # Daha önce eklenmiş mi kontrol et
         starboard_data = db.kv_get("starboard_messages", {}) or {}
         message_key = f"{payload.guild_id}_{payload.message_id}"
         
         if message_key in starboard_data:
-            # Mesajı güncelle
             try:
                 starboard_msg = await starboard_channel.fetch_message(starboard_data[message_key])
                 embed = starboard_msg.embeds[0]
@@ -85,7 +80,6 @@ class Starboard(commands.Cog):
                 pass
             return
         
-        # Yeni starboard mesajı oluştur
         embed = discord.Embed(
             description=message.content or "*Medya mesajı*",
             color=discord.Color.gold(),
@@ -101,7 +95,6 @@ class Starboard(commands.Cog):
             inline=False
         )
         
-        # Resim varsa ekle
         if message.attachments:
             embed.set_image(url=message.attachments[0].url)
         
@@ -109,7 +102,6 @@ class Starboard(commands.Cog):
         
         starboard_msg = await starboard_channel.send(embed=embed)
         
-        # Veritabanına kaydet
         starboard_data[message_key] = starboard_msg.id
         db.kv_set("starboard_messages", starboard_data)
     

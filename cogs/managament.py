@@ -22,20 +22,17 @@ class Management(commands.Cog):
         except Exception:
             self.logger.exception("Ayar kaydetme hatası")
 
-    # 🗣️ KANAL AYARLAMA
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
         if not self.bot.user.mentioned_in(message): return
 
-        # Sadece Yönetici
         if not message.author.guild_permissions.administrator: return
 
         icerik = message.content.lower().replace(f"<@{self.bot.user.id}>", "").strip()
         guild_id = str(message.guild.id)
         channel_id = message.channel.id
 
-        # KOMUT: "@TrAI senin kanalın burası"
         aktif_kelimeler = ["senin kanalın", "burada konuş", "aktif ol", "mekanın", "burası senin"]
 
         if any(k in icerik for k in aktif_kelimeler):

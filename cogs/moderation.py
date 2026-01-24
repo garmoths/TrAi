@@ -14,7 +14,6 @@ class Moderation(commands.Cog):
         self.bot = bot
         self.logger = get_logger(__name__)
 
-    # --- HİYERARŞİ KONTROLÜ ---
     async def hiyerarsi_kontrol(self, ctx_or_msg, member):
         if isinstance(member, discord.User): return True
         author = ctx_or_msg.author if isinstance(ctx_or_msg, discord.Message) else ctx_or_msg.author
@@ -33,10 +32,6 @@ class Moderation(commands.Cog):
             await ctx_or_msg.channel.send(f"🤖 **{member.name}** benim yetkimin üzerinde.")
             return False
         return True
-
-    # =========================================================================
-    # 1. BÖLÜM: PREFİX KOMUTLAR (!sil, !ban)
-    # =========================================================================
 
     @commands.command(name="sil", aliases=["temizle", "clear", "purge"])
     @commands.has_permissions(manage_messages=True)
@@ -60,11 +55,9 @@ class Moderation(commands.Cog):
             self.logger.exception("Warn kaydedilemedi")
             warn_id = None
 
-        # Uyarı sayısını al ve rol ver
         user_warns = warn_utils.list_warnings(ctx.guild.id, member.id)
         warn_count = len(user_warns)
         
-        # RoleManager ile uyarı rolü güncelle
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:
@@ -81,9 +74,7 @@ class Moderation(commands.Cog):
             embed.add_field(name="Uyarı ID", value=str(warn_id))
         embed.set_footer(text=f"Yetkili: {ctx.author.name}")
         await ctx.send(embed=embed)
-        # DM the user with a rich embed containing details + current warn count
         try:
-            # check per-command settings
             ayarlar = db.kv_get("settings", {}) or {}
             cmd_conf = ayarlar.get(str(ctx.guild.id), {}).get("commands", {}).get(ctx.command.name, {})
             send_dm = cmd_conf.get("send_dm", True)
@@ -99,7 +90,6 @@ class Moderation(commands.Cog):
                 dm_embed.set_footer(text=f"Uyarı ID: {warn_id if warn_id else '-'}")
                 dm_embed.timestamp = discord.utils.utcnow()
                 try:
-                    # send custom text first if configured
                     if custom_text:
                         try:
                             await member.send(custom_text)
@@ -107,15 +97,12 @@ class Moderation(commands.Cog):
                             pass
                     await member.send(embed=dm_embed)
                 except Exception:
-                    # ignore DM failures
                     pass
         except Exception:
             self.logger.exception("Uyarı DM'i hazırlanırken hata oluştu")
 
-        # Also log to configured log channel if available (handled by cogs/logger listener)
-        # Auto-mute: if user has reached 3 warnings, apply 10 minute timeout
         try:
-            # read per-guild settings (fallback to defaults)
+
             ayarlar = db.kv_get("settings", {}) or {}
             guild_settings = ayarlar.get(str(ctx.guild.id), {})
             threshold = int(guild_settings.get("auto_mute_threshold", 3))
@@ -127,7 +114,6 @@ class Moderation(commands.Cog):
                     delta = datetime.timedelta(minutes=minutes)
                     await member.timeout(discord.utils.utcnow() + delta)
                     await ctx.send(f"🔇 **{member.name}** {threshold} uyarı nedeniyle {minutes} dakika susturuldu.")
-                    # log to channel if set
                     try:
                         kanal_id = guild_settings.get("log_kanali")
                         if kanal_id:
@@ -188,7 +174,6 @@ class Moderation(commands.Cog):
             delta = datetime.timedelta(hours=sure)
         await member.timeout(discord.utils.utcnow() + delta)
         
-        # Susturulmuş rolü ver
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:
@@ -204,7 +189,6 @@ class Moderation(commands.Cog):
     async def unmute_komut(self, ctx, member: discord.Member):
         await member.timeout(None)
         
-        # Susturulmuş rolü al
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:
@@ -242,7 +226,6 @@ class Moderation(commands.Cog):
             lines.append(f"ID:{rid} • Kullanıcı:{uid} • Yetkili:{mid} • {reason} • {ts}")
 
         chunk = "\n".join(lines)
-        # If too long, split into multiple messages
         if len(chunk) > 1900:
             for i in range(0, len(chunk), 1900):
                 await ctx.send(chunk[i:i+1900])
@@ -365,7 +348,6 @@ class Moderation(commands.Cog):
 
         icerik = message.content.lower().replace(f"<@{self.bot.user.id}>", "").strip()
 
-        # KELİME LİSTELERİ
         sil_listesi = ["sil", "temizle", "süpür", "yok et", "kaldır", "clear", "purge", "delete", "sıfırla", "uçur"]
         af_listesi = ["aç", "konuş", "kaldır", "affet", "boz", "çıkardım", "özgür", "unban", "unmute"]
         uyar_listesi = ["uyar", "ikaz", "dikkat", "kız", "uyarı", "sarı kart", "warn"]
@@ -373,9 +355,7 @@ class Moderation(commands.Cog):
         ban_listesi = ["ban", "yasakla", "uçur", "paketle", "yargı", "fırlat", "engelle", "infaz"]
         kick_listesi = ["kick", "at", "kov", "dışarı", "postala", "sepetle", "şutla", "yolla"]
 
-        # --- A) SİLME İŞLEMİ ---
         if any(k in icerik for k in sil_listesi) and not any(b in icerik for b in ban_listesi):
-            # Sayıyı bul (100 mesaj sil)
             sayi_bul = re.search(r'(\d+)', icerik)
             miktar = int(sayi_bul.group(1)) if sayi_bul else 5
 
@@ -384,7 +364,6 @@ class Moderation(commands.Cog):
                 miktar = 1000
 
             try:
-                # bulk=True ile hızlı silme
                 deleted = await message.channel.purge(limit=miktar + 1, bulk=True)
                 sayi = len(deleted) - 1  # Komut mesajını sayıdan düş
                 if sayi < 0: sayi = 0
@@ -395,14 +374,12 @@ class Moderation(commands.Cog):
                 await message.channel.send("❌ 14 günden eski mesajları Discord API gereği silemiyorum.")
             return
 
-        # HEDEF KİŞİ BULMA
         hedef = None
         for user in message.mentions:
             if user.id != self.bot.user.id:
                 hedef = user
                 break
 
-        # B) BAN KALDIRMA
         if any(k in icerik for k in ["ban", "yasak"]) and any(a in icerik for a in af_listesi):
             if not message.author.guild_permissions.ban_members: return
             async with message.channel.typing():
@@ -425,7 +402,6 @@ class Moderation(commands.Cog):
 
         if not hedef: return
 
-        # C) DİĞER KOMUTLAR
         if any(k in icerik for k in af_listesi):
             if await self.hiyerarsi_kontrol(message, hedef):
                 await hedef.timeout(None)
@@ -472,10 +448,6 @@ class Moderation(commands.Cog):
                 await message.channel.send(f"👢 **{hedef.name}** atıldı.")
             return
 
-    # =========================================================================
-    # SLASH KOMUTLAR (Discord / Menüsü için)
-    # =========================================================================
-
     @app_commands.command(name="sil", description="🧹 Belirtilen sayıda mesajı siler")
     @app_commands.checks.has_permissions(manage_messages=True)
     @app_commands.describe(miktar="Silinecek mesaj sayısı (max 1000)")
@@ -511,7 +483,6 @@ class Moderation(commands.Cog):
         user_warns = warn_utils.list_warnings(interaction.guild.id, uye.id)
         warn_count = len(user_warns)
         
-        # RoleManager ile uyarı rolü güncelle
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:

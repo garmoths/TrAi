@@ -92,7 +92,6 @@ class Polls(commands.Cog):
         
         message = await interaction.original_response()
         
-        # Emojileri ekle
         for i in range(len(secenekler)):
             await message.add_reaction(emojiler[i])
     

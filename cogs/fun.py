@@ -91,7 +91,6 @@ class Fun(commands.Cog):
     )
     async def ship(self, interaction: discord.Interaction, kişi1: discord.Member, kişi2: discord.Member):
         """İki kişi arasındaki uyumu hesaplar."""
-        # Deterministik olması için isimlere göre seed
         random.seed(f"{kişi1.id}{kişi2.id}")
         uyum = random.randint(0, 100)
         random.seed()  # Reset seed
@@ -112,7 +111,6 @@ class Fun(commands.Cog):
             mesaj = "💀 Hiç Uyuşmuyor"
             renk = discord.Color.dark_red()
         
-        # İlerleme çubuğu
         bar_length = 10
         filled = int((uyum / 100) * bar_length)
         bar = "█" * filled + "░" * (bar_length - filled)

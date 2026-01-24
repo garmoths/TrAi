@@ -17,7 +17,6 @@ class General(commands.Cog):
             color=discord.Color.dark_blue()
         )
 
-        # 1. BÖLÜM: YAPAY ZEKA
         embed.add_field(
             name="🧠 Yapay Zeka & Sohbet",
             value="• **Sohbet:** Beni etiketle veya direkt yaz. (Örn: *Naber?* veya *Dolar kaç?*)\n"
@@ -26,7 +25,6 @@ class General(commands.Cog):
             inline=False
         )
 
-        # 2. BÖLÜM: MODERASYON (Şu an aktif olanlar)
         embed.add_field(
             name="🛡️ Moderasyon (Yetkili)",
             value="• `!sil [sayı]` : Belirtilen sayıda mesajı temizler.\n"
@@ -37,18 +35,15 @@ class General(commands.Cog):
             inline=False
         )
 
-        # 3. BÖLÜM: DİĞER
         embed.add_field(
             name="⚙️ Sistem",
             value="• `!ping` : Botun gecikme süresini gösterir.",
             inline=False
         )
 
-        # Footer (Alt Bilgi)
         embed.set_footer(text=f"İsteyen: {ctx.author.name} | TrAI Bot Sürüm 1.0",
                          icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
 
-        # Botun avatarı varsa embed'in sağına koy
         if self.bot.user.avatar:
             embed.set_thumbnail(url=self.bot.user.avatar.url)
 
@@ -57,10 +52,6 @@ class General(commands.Cog):
     @commands.command(name="ping")
     async def ping(self, ctx):
         await ctx.reply(f"🏓 Pong! Gecikmem: **{round(self.bot.latency * 1000)}ms**")
-
-    # =========================================================================
-    # SLASH KOMUTLAR
-    # =========================================================================
 
     @app_commands.command(name="yardım", description="📖 Bot komutlarını ve özelliklerini gösterir")
     async def yardim_slash(self, interaction: discord.Interaction):

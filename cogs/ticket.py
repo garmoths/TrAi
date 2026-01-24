@@ -24,7 +24,6 @@ class Ticket(commands.Cog):
             self.logger.exception("Ayar getirilemedi")
             return {}
 
-    # --- 1. GİRİŞ BUTONU ---
     class TicketCreateView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
@@ -63,12 +62,10 @@ class Ticket(commands.Cog):
             # Yönetici Paneli Butonlarını Ekliyoruz
             await channel.send(embed=embed, view=Ticket.TicketControlView())
 
-    # --- 2. YÖNETİM PANELİ (GELİŞTİRİLMİŞ) ---
     class TicketControlView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
 
-        # A) KAPATMA BUTONU
         @discord.ui.button(label="Kapat", style=discord.ButtonStyle.red, emoji="🔒", custom_id="ticket_close_btn")
         async def close_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.send_message("❓ Emin misin?", view=Ticket.TicketConfirmView(), ephemeral=True)

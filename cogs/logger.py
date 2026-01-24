@@ -27,27 +27,20 @@ class Logger(commands.Cog):
         except Exception:
             self.logger.exception("Log ayarı kaydedilemedi")
 
-    # 🗣️ LOG KANALINI AYARLAMA (Doğal Dil)
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
-        # Sadece Yönetici
         if not message.author.guild_permissions.administrator: return
-        # Bot etiketlenmeli
         if not self.bot.user.mentioned_in(message): return
 
         icerik = message.content.lower()
 
-        # Komut: "@TrAI log kanalı burası olsun" veya "kayıtları buraya at"
         if "log" in icerik or "kayıt" in icerik:
             if "burası" in icerik or "kanal" in icerik or "olsun" in icerik:
                 self.ayar_kaydet(message.guild.id, message.channel.id)
                 await message.channel.send(
                     f"🕵️‍♂️ Anlaşıldı! Bundan sonra sunucuda uçan kuşu bile **{message.channel.mention}** kanalına raporlayacağım.")
 
-    # ------------------ OLAYLAR (EVENTS) ------------------
-
-    # 1. MESAJ SİLİNDİĞİNDE
     @commands.Cog.listener()
     async def on_message_delete(self, message):
         if message.author.bot: return
@@ -67,7 +60,6 @@ class Logger(commands.Cog):
 
         await log_channel.send(embed=embed)
 
-    # 2. MESAJ DÜZENLENDİĞİNDE
     @commands.Cog.listener()
     async def on_message_edit(self, before, after):
         if before.author.bot or before.content == after.content: return
@@ -86,7 +78,6 @@ class Logger(commands.Cog):
 
         await log_channel.send(embed=embed)
 
-    # 3. BİRİ BANLANDIĞINDA
     @commands.Cog.listener()
     async def on_member_ban(self, guild, user):
         ayarlar = self.ayar_getir(guild.id)
@@ -98,7 +89,6 @@ class Logger(commands.Cog):
         embed.set_thumbnail(url=user.display_avatar.url)
         await log_channel.send(embed=embed)
 
-    # 4. BİRİ BANINI AÇTIĞINDA (UNBAN)
     @commands.Cog.listener()
     async def on_member_unban(self, guild, user):
         ayarlar = self.ayar_getir(guild.id)
@@ -109,20 +99,17 @@ class Logger(commands.Cog):
                               color=discord.Color.green())
         await log_channel.send(embed=embed)
 
-    # 5. SES KANALINA GİRİŞ/ÇIKIŞ
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         ayarlar = self.ayar_getir(member.guild.id)
         if "log_kanali" not in ayarlar: return
         log_channel = self.bot.get_channel(ayarlar["log_kanali"])
 
-        # Kanala Girdi
         if before.channel is None and after.channel is not None:
             embed = discord.Embed(description=f"🔊 **{member.name}**, `{after.channel.name}` ses kanalına girdi.",
                                   color=discord.Color.blue())
             await log_channel.send(embed=embed)
 
-        # Kanaldan Çıktı
         elif before.channel is not None and after.channel is None:
             embed = discord.Embed(description=f"🔇 **{member.name}**, `{before.channel.name}` ses kanalından çıktı.",
                                   color=discord.Color.greyple())

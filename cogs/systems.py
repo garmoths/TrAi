@@ -27,12 +27,10 @@ class Systems(commands.Cog):
     # 👋 AKILLI RESİMLİ HOŞGELDİN
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        # Pillow yoksa resim özelliğini kapat
         if not HAS_PILLOW:
             self.logger.debug("Pillow yüklü değil, welcome image devre dışı")
             return
         
-        # 1. Panelden özellik açık mı kontrol et
         if not self.ayar_getir(member.guild.id, "hosgeldin_resmi"):
             return
 

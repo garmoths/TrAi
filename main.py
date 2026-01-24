@@ -6,8 +6,6 @@ from dotenv import load_dotenv
 from utils.logger import setup_logging, get_logger
 from utils import db
 
-
-# --- 1. DEPENDENCY CHECK (safer) ---
 missing_pkgs = []
 try:
     import discord
@@ -37,8 +35,6 @@ if missing_pkgs:
     import sys
     sys.exit(1)
 
-# --- 2. AYARLAR ---
-
 load_dotenv()
 setup_logging()
 logger = get_logger(__name__)
@@ -47,15 +43,12 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# Bot varsayılan olarak konuşma aktif
 bot.ai_aktif = True
 
-# --- 3. BOT OLAYLARI ---
 @bot.event
 async def on_ready():
     logger.info(f'{bot.user} olarak giriş yapıldı!')
 
-    # Botun durumu: "Oynuyor: @TrAI yardım | v3.0"
     await bot.change_presence(
         activity=discord.Game(name="@TrAI yardım | Yapay Zeka 🧠")
     )
@@ -72,7 +65,6 @@ async def on_ready():
             except Exception as e:
                 logger.exception(f"   ❌ HATA - {filename} yüklenemedi:")
 
-    # Slash komutları Discord'a sync et (cog'lar yüklendikten sonra)
     try:
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} slash komut Discord'a senkronize edildi!")

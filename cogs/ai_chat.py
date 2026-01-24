@@ -17,14 +17,12 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
 import wikipedia
 
-# DuckDuckGo Search (optional)
 try:
     from ddgs import DDGS
     HAS_DDGS = True
 except ImportError:
     HAS_DDGS = False
 
-# Selenium (optional)
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -33,7 +31,6 @@ try:
 except ImportError:
     HAS_SELENIUM = False
 
-# Türkçe Tarih Ayarı (Linux/Windows uyumlu)
 try:
     locale.setlocale(locale.LC_ALL, 'tr_TR.UTF-8')
 except Exception:
@@ -48,7 +45,6 @@ GUIDE_FILE = "guide.json"
 
 
 class AIChat(commands.Cog):
-    # Hafıza: son 20 mesajla sınırlandırılmış kanal özeti
     HISTORY_LIMIT = 20
 
     def __init__(self, bot):
@@ -65,13 +61,11 @@ class AIChat(commands.Cog):
         self.user_last_call = {}
         self.odak_suresi = 60
         self.kilavuz_verisi = self.kilavuz_yukle()
-        # strip_emojis yardımcı fonksiyonunu örnek olarak sakla
         self.strip_emojis = strip_emojis
-        self.web_cache = {}  # {sorgu: {"result": data, "time": timestamp}}
-        self.cache_ttl = 1800  # 30 dakika cache
+        self.web_cache = {}
+        self.cache_ttl = 1800
 
     def web_ara_google(self, sorgu, max_results=3):
-        # Cache kontrol
         cache_key = f"google_{sorgu.lower()}_{max_results}"
         if cache_key in self.web_cache:
             cached = self.web_cache[cache_key]
@@ -95,7 +89,6 @@ class AIChat(commands.Cog):
             return None
 
     def web_ara_duckduckgo_tr(self, sorgu, max_results=3):
-        """DuckDuckGo TR ile arama"""
         if not HAS_DDGS:
             return None
         cache_key = f"ddgs_tr_{sorgu.lower()}_{max_results}"
@@ -122,7 +115,6 @@ class AIChat(commands.Cog):
             return None
 
     def web_ara_duckduckgo_global(self, sorgu, max_results=3):
-        """DuckDuckGo Global ile arama"""
         if not HAS_DDGS:
             return None
         cache_key = f"ddgs_global_{sorgu.lower()}_{max_results}"
@@ -149,7 +141,6 @@ class AIChat(commands.Cog):
             return None
 
     def web_ara_selenium(self, sorgu, max_results=3):
-        """Selenium ile DuckDuckGo scrape"""
         if not HAS_SELENIUM:
             return None
         cache_key = f"selenium_{sorgu.lower()}_{max_results}"
@@ -205,28 +196,22 @@ class AIChat(commands.Cog):
         return "\n\n".join(results) if results else None
 
     def web_ara_birlesik(self, sorgu, max_results=3):
-        """Web arama - Öncelik: Selenium > Google > DuckDuckGo TR > DuckDuckGo Global > Wikipedia"""
-        # 1. Selenium (DuckDuckGo scrape)
         sonuc = self.web_ara_selenium(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
         
-        # 2. Google Search
         sonuc = self.web_ara_google(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
         
-        # 3. DuckDuckGo TR
         sonuc = self.web_ara_duckduckgo_tr(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
         
-        # 4. DuckDuckGo Global
         sonuc = self.web_ara_duckduckgo_global(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
         
-        # 5. Wikipedia (son çare)
         sonuc = self.web_ara_wikipedia(sorgu)
         if sonuc:
             return sonuc
@@ -234,7 +219,6 @@ class AIChat(commands.Cog):
         return None
 
     def tr_ilk_sonuclari_getir(self, sorgu, max_results=3):
-        """Google Search ile arama yap ve URL'leri döndür."""
         try:
             from googlesearch import search
             urls = []
@@ -292,7 +276,6 @@ class AIChat(commands.Cog):
     def _kur_metinden_cek(self, text):
         if not text:
             return None
-        # Türkçe/İngilizce biçimleri yakala
         patterns = [
             r"(\d+[\.,]\d+)\s*TL",
             r"(\d+[\.,]\d+)\s*Türk\s*Lirası",
@@ -309,8 +292,6 @@ class AIChat(commands.Cog):
         return None
 
     def kur_webden_getir(self, base="USD", target="TRY"):
-        """Güncel kur bilgisi çek - Google Finance API kullan"""
-        # 1. Google Finance API (en güncel)
         try:
             url = f"https://www.google.com/finance/quote/{base}-{target}"
             headers = {
@@ -330,7 +311,6 @@ class AIChat(commands.Cog):
         except Exception as e:
             self.logger.debug(f"Google Finance hatası: {e}")
 
-        # 2. Selenium ile Google Search (fallback)
         if HAS_SELENIUM:
             query = f"1 {base} to {target}"
             try:
@@ -364,7 +344,6 @@ class AIChat(commands.Cog):
             except Exception as e:
                 self.logger.debug(f"Selenium kur hatası: {e}")
 
-        # 3. DuckDuckGo fallback
         if HAS_DDGS:
             query = f"1 {base} to {target}"
             try:
