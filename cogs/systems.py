@@ -4,6 +4,8 @@ import json
 import datetime
 # Resim kütüphanesi
 from easy_pil import Editor, Canvas, Font, load_image_async
+from utils import db
+from utils.logger import get_logger
 
 SETTINGS_FILE = "settings.json"
 
@@ -11,10 +13,10 @@ SETTINGS_FILE = "settings.json"
 class Systems(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.logger = get_logger(__name__)
 
     def ayar_getir(self, guild_id, key):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = db.kv_get("settings", {}) or {}
         return data.get(str(guild_id), {}).get(key, False)
 
     # 👋 AKILLI RESİMLİ HOŞGELDİN
@@ -49,7 +51,7 @@ class Systems(commands.Cog):
 
         # Hala kanal yoksa pes et
         if not channel:
-            print(f"⚠️ Uyarı: {member.guild.name} sunucunda uygun bir hoşgeldin kanalı bulunamadı.")
+            self.logger.warning(f"{member.guild.name} sunucunda uygun bir hoşgeldin kanalı bulunamadı.")
             return
 
         # 3. Resmi Hazırla
@@ -59,13 +61,14 @@ class Systems(commands.Cog):
             profile_image = await load_image_async(str(member.avatar.url))
             profile = Editor(profile_image).resize((200, 200)).circle_image()
             background.paste(profile, (50, 50))
-        except:
-            pass
+        except Exception as e:
+            self.logger.debug("Failed to load welcome profile image: %s", e)
 
         try:
             font_big = Font.poppins(size=50, variant="bold")
             font_small = Font.poppins(size=30, variant="regular")
         except:
+            self.logger.debug("Failed to load fonts for welcome image")
             font_big = None
             font_small = None
 

@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import asyncio
 import random
@@ -6,6 +7,9 @@ import datetime
 import re
 import json
 import os
+from utils.helpers import is_recent_message, mark_recent_message
+from utils import db
+from utils.logger import get_logger
 
 DB_FILE = "giveaways.json"
 
@@ -16,6 +20,7 @@ class Giveaway(commands.Cog):
         self.aktif_cekilisler = {}
         self.son_biten_cekilis = {'katilimcilar': [], 'odul': "Bilinmiyor"}
         self.bot.loop.create_task(self.veritabani_yukle())
+        self.logger = get_logger(__name__)
 
     # --- VERİTABANI İŞLEMLERİ ---
     def kaydet(self):
@@ -28,14 +33,15 @@ class Giveaway(commands.Cog):
                 "kazanan_sayisi": v.get("kazanan_sayisi", 1),
                 "rol_sarti": v.get("rol_sarti", None)
             }
-        with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(data, f, indent=4)
+        try:
+            db.kv_set("giveaways", data)
+        except Exception:
+            self.logger.exception("Giveaway kaydetme hata")
 
     async def veritabani_yukle(self):
         await self.bot.wait_until_ready()
-        if not os.path.exists(DB_FILE): return
         try:
-            with open(DB_FILE, "r") as f:
-                data = json.load(f)
+            data = db.kv_get("giveaways", {}) or {}
             for cid, v in data.items():
                 try:
                     kanal = self.bot.get_channel(v["kanal_id"])
@@ -59,9 +65,11 @@ class Giveaway(commands.Cog):
                         "kazanan_sayisi": kazanan_sayisi, "rol_sarti": rol_sarti
                     }
                     self.bot.add_view(view)
-                except:
+                except Exception:
+                    self.logger.exception("Giveaway veritabanı yüklenirken hata")
                     pass
-        except:
+        except Exception:
+            self.logger.exception("Giveaway veritabanı okunamadı")
             pass
 
     # --- BUTON ---
@@ -96,8 +104,13 @@ class Giveaway(commands.Cog):
                 await interaction.response.send_message("✅ Katıldın!", ephemeral=True)
                 try:
                     await interaction.message.edit(view=self)
-                except:
-                    pass
+                except Exception as e:
+                    try:
+                        cog = interaction.client.get_cog("Giveaway")
+                        if cog:
+                            cog.logger.debug("Failed to edit giveaway message view: %s", e)
+                    except Exception:
+                        pass
                 cog = interaction.client.get_cog("Giveaway")
                 if cog: cog.kaydet()
 
@@ -133,8 +146,8 @@ class Giveaway(commands.Cog):
         for c in view.children: c.disabled = True
         try:
             await data['message'].edit(view=view)
-        except:
-            pass
+        except Exception as e:
+            self.logger.debug("Failed to edit message when finishing giveaway: %s", e)
 
         if not k_list:
             await channel.send(f"😕 Kimse katılmadı, **{data['odul']}** iptal.")
@@ -165,6 +178,7 @@ class Giveaway(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
+        if is_recent_message(message.id): return
         if not self.bot.user.mentioned_in(message): return
         if not message.author.guild_permissions.manage_messages: return
         icerik = message.content.lower()
@@ -182,9 +196,11 @@ class Giveaway(commands.Cog):
                 cid = id_bul.group(1)
                 self.aktif_cekilisler[cid]['task'].cancel()
                 await message.channel.send(f"⏹️ **#{cid}** sonlandırılıyor...")
+                mark_recent_message(message.id)
                 await self.cekilisi_bitir(cid, message.channel)
             else:
                 await message.reply("❌ ID bulunamadı.")
+                mark_recent_message(message.id)
             return
 
         # BAŞLATMA
@@ -197,6 +213,7 @@ class Giveaway(commands.Cog):
                 await message.channel.send(
                     embed=discord.Embed(title="❌ Hata", description="Süre belirtmedin! Örn: `10dk`, `1saat`",
                                         color=discord.Color.red()))
+                mark_recent_message(message.id)
                 return
 
             kazanan_sayisi = self.kazanan_sayisi_bul(icerik)
@@ -226,6 +243,7 @@ class Giveaway(commands.Cog):
 
             view = self.CekilisButonu(saniye, embed, rol_sarti)
             msg = await message.channel.send(embed=embed, view=view)
+            mark_recent_message(message.id)
 
             task = asyncio.create_task(self.cekilis_zamanlayici(saniye, cid, message.channel))
             self.aktif_cekilisler[cid] = {
@@ -234,6 +252,127 @@ class Giveaway(commands.Cog):
                 'kazanan_sayisi': kazanan_sayisi, 'rol_sarti': rol_sarti
             }
             self.kaydet()
+
+    # =========================================================================
+    # SLASH KOMUTLAR
+    # =========================================================================
+
+    @app_commands.command(name="çekiliş-başlat", description="🎉 Çekiliş başlatır")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        süre="Çekiliş süresi (örn: 1m, 30s, 1h)",
+        ödül="Çekiliş ödülü",
+        kazanan_sayısı="Kazanan sayısı (varsayılan: 1)"
+    )
+    async def cekilis_baslat_slash(self, interaction: discord.Interaction, süre: str, ödül: str, kazanan_sayısı: int = 1):
+        """Slash komut ile çekiliş başlatır."""
+        # Süre parsing
+        match = re.match(r'(\d+)\s*([smhd])', süre.lower())
+        if not match:
+            await interaction.response.send_message("❌ Geçersiz süre formatı! Örnek: `1m`, `30s`, `2h`", ephemeral=True)
+            return
+        
+        miktar = int(match.group(1))
+        birim = match.group(2)
+        
+        if birim == 's':
+            saniye = miktar
+        elif birim == 'm':
+            saniye = miktar * 60
+        elif birim == 'h':
+            saniye = miktar * 3600
+        elif birim == 'd':
+            saniye = miktar * 86400
+        else:
+            saniye = miktar * 60
+
+        cid = f"{interaction.guild.id}_{interaction.channel.id}_{int(datetime.datetime.now().timestamp())}"
+        bitis = datetime.datetime.now() + datetime.timedelta(seconds=saniye)
+        unix = int(bitis.timestamp())
+
+        embed = discord.Embed(title="🎉 ÇEKİLİŞ!", description=f"**Ödül:** {ödül}", color=discord.Color.green())
+        embed.add_field(name="👥 Katılımcı", value="0 kişi", inline=True)
+        embed.add_field(name="🎯 Kazanan", value=f"{kazanan_sayısı} kişi", inline=True)
+        embed.add_field(name="⏱️ Bitiş", value=f"<t:{unix}:R>", inline=False)
+        embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/1139/1139982.png")
+        embed.set_footer(text=f"ID: #{cid}")
+
+        view = self.CekilisButonu(saniye, embed, None)
+        
+        await interaction.response.send_message(embed=embed, view=view)
+        msg = await interaction.original_response()
+
+        task = asyncio.create_task(self.cekilis_zamanlayici(saniye, cid, interaction.channel))
+        self.aktif_cekilisler[cid] = {
+            'task': task, 'view': view, 'message': msg, 'odul': ödül,
+            'kanal_id': interaction.channel.id, 'mesaj_id': msg.id, 'bitis': bitis,
+            'kazanan_sayisi': kazanan_sayısı, 'rol_sarti': None
+        }
+        self.kaydet()
+
+    @app_commands.command(name="çekiliş-liste", description="📋 Aktif çekilişleri listeler")
+    async def cekilis_liste_slash(self, interaction: discord.Interaction):
+        """Aktif çekilişleri listeler."""
+        if not self.aktif_cekilisler:
+            await interaction.response.send_message("❌ Aktif çekiliş yok.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📋 Aktif Çekilişler", color=discord.Color.blue())
+        
+        for cid, data in list(self.aktif_cekilisler.items())[:10]:
+            odul = data.get('odul', 'Bilinmiyor')
+            bitis = data.get('bitis')
+            katilimci = len(data['view'].katilimcilar)
+            
+            if bitis:
+                unix = int(bitis.timestamp())
+                embed.add_field(
+                    name=f"🎁 {odul}",
+                    value=f"👥 {katilimci} katılımcı\n⏰ <t:{unix}:R>\n🆔 #{cid}",
+                    inline=False
+                )
+        
+        embed.set_footer(text=f"Toplam {len(self.aktif_cekilisler)} aktif çekiliş")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @app_commands.command(name="çekiliş-yeniden", description="🔄 Çekilişi yeniden çeker")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(cekilis_id="Çekiliş ID'si")
+    async def cekilis_reroll(self, interaction: discord.Interaction, cekilis_id: str):
+        """Çekilişi yeniden çeker (reroll)."""
+        if not self.son_biten_cekilis or not self.son_biten_cekilis.get('katilimcilar'):
+            await interaction.response.send_message("❌ Yeniden çekilecek çekiliş bulunamadı!", ephemeral=True)
+            return
+        
+        katilimcilar = self.son_biten_cekilis['katilimcilar']
+        odul = self.son_biten_cekilis['odul']
+        
+        if not katilimcilar:
+            await interaction.response.send_message("❌ Çekilişte katılımcı yok!", ephemeral=True)
+            return
+        
+        yeni_kazanan = random.choice(katilimcilar)
+        
+        embed = discord.Embed(
+            title="🔄 YENİDEN ÇEKİLİŞ!",
+            description=f"🎁 **Ödül:** {odul}\n👑 **Yeni Kazanan:** <@{yeni_kazanan}>",
+            color=discord.Color.orange()
+        )
+        
+        await interaction.response.send_message(content=f"Tebrikler <@{yeni_kazanan}>! 🎉", embed=embed)
+    
+    @app_commands.command(name="çekiliş-bitir", description="⏹️ Çekilişi erken bitirir")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(cekilis_id="Çekiliş ID'si")
+    async def cekilis_bitir(self, interaction: discord.Interaction, cekilis_id: str):
+        """Çekilişi erken bitirir."""
+        if cekilis_id not in self.aktif_cekilisler:
+            await interaction.response.send_message("❌ Bu ID'de aktif çekiliş bulunamadı!", ephemeral=True)
+            return
+        
+        self.aktif_cekilisler[cekilis_id]['task'].cancel()
+        await interaction.response.send_message(f"⏹️ **#{cekilis_id}** çekilişi sonlandırılıyor...")
+        await self.cekilisi_bitir(cekilis_id, interaction.channel)
 
 
 async def setup(bot):

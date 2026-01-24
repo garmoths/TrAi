@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import json
 import os
+from utils.helpers import is_recent_message, mark_recent_message, safe_load_json
 
 GUIDE_FILE = "guide.json"
 
@@ -11,24 +12,23 @@ class Help(commands.Cog):
         self.bot = bot
 
     def kilavuz_oku(self):
-        if not os.path.exists(GUIDE_FILE): return {}
-        with open(GUIDE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        from utils import db
+        return db.kv_get("guide", {}) or {}
 
     # --- MENÜ SİSTEMİ (Detaylı Kılavuz İçin) ---
     class HelpSelect(discord.ui.Select):
         def __init__(self, data):
             self.data = data
             options = [
-                discord.SelectOption(label="Çekiliş Sistemi", emoji="🎉", value="çekiliş",
+                discord.SelectOption(label="Çekiliş Sistemi", value="çekiliş",
                                      description="Başlatma, Reroll, Şartlı Çekiliş"),
-                discord.SelectOption(label="Moderasyon", emoji="🛡️", value="moderasyon",
+                discord.SelectOption(label="Moderasyon", value="moderasyon",
                                      description="Ban, Kick, Mute ve Af komutları"),
-                discord.SelectOption(label="Ticket (Destek)", emoji="🎫", value="ticket",
+                discord.SelectOption(label="Ticket (Destek)", value="ticket",
                                      description="Kurulum ve Yetkili paneli"),
-                discord.SelectOption(label="Genel Ayarlar", emoji="⚙️", value="genel",
+                discord.SelectOption(label="Genel Ayarlar", value="genel",
                                      description="Kanal ve Log ayarlamaları"),
-                discord.SelectOption(label="Yapay Zeka", emoji="🧠", value="yapayzeka", description="Sohbet özellikleri")
+                discord.SelectOption(label="Yapay Zeka", value="yapayzeka", description="Sohbet özellikleri")
             ]
             super().__init__(placeholder="Detaylı bilgi için kategori seç...", min_values=1, max_values=1,
                              options=options)
@@ -54,6 +54,8 @@ class Help(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
+        if is_recent_message(message.id):
+            return
         if not self.bot.user.mentioned_in(message): return
 
         icerik = message.content.lower()
@@ -86,6 +88,7 @@ class Help(commands.Cog):
 
             embed.set_footer(text="Detaylı kullanım örnekleri için '@TrAI kılavuz' yazabilirsin.")
             await message.channel.send(embed=embed)
+            mark_recent_message(message.id)
             return
 
         # 2. DURUM: DETAYLI KILAVUZ İSTERSE ("kılavuz", "yardım")
@@ -98,6 +101,7 @@ class Help(commands.Cog):
             )
             embed.set_thumbnail(url=self.bot.user.avatar.url)
             await message.channel.send(embed=embed, view=self.HelpView(data))
+            mark_recent_message(message.id)
 
 
 async def setup(bot):
