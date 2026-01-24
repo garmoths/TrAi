@@ -29,10 +29,6 @@ try:
     from bs4 import BeautifulSoup
 except ImportError:
     missing_pkgs.append("beautifulsoup4")
-try:
-    from easy_pil import Editor
-except ImportError:
-    missing_pkgs.append("easy-pil")
 
 if missing_pkgs:
     print("❌ Eksik paket(ler) tespit edildi:", ", ".join(missing_pkgs))

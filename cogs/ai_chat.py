@@ -16,7 +16,22 @@ import logging
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
 import wikipedia
-from tavily import TavilyClient
+
+# DuckDuckGo Search (optional)
+try:
+    from ddgs import DDGS
+    HAS_DDGS = True
+except ImportError:
+    HAS_DDGS = False
+
+# Selenium (optional)
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    HAS_SELENIUM = True
+except ImportError:
+    HAS_SELENIUM = False
 
 # Türkçe Tarih Ayarı (Linux/Windows uyumlu)
 try:
@@ -38,15 +53,13 @@ class AIChat(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.logger = get_logger(__name__)
+        
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise ValueError("❌ GROQ_API_KEY bulunamadı! Lütfen .env dosyanızı kontrol edin.")
         self.client = Groq(api_key=api_key)
         
-        # Tavily Search API
-        tavily_key = os.getenv("TAVILY_API_KEY")
-        self.tavily_client = TavilyClient(api_key=tavily_key) if tavily_key else None
-
         self.cooldown_suresi = 4
         self.odaklanilan_kisiler = {}
         self.user_last_call = {}
@@ -54,43 +67,8 @@ class AIChat(commands.Cog):
         self.kilavuz_verisi = self.kilavuz_yukle()
         # strip_emojis yardımcı fonksiyonunu örnek olarak sakla
         self.strip_emojis = strip_emojis
-        self.logger = get_logger(__name__)
         self.web_cache = {}  # {sorgu: {"result": data, "time": timestamp}}
         self.cache_ttl = 1800  # 30 dakika cache
-
-    def web_ara_tavily(self, sorgu, max_results=3):
-        """Tavily API kullanarak web araması yap."""
-        if not self.tavily_client:
-            self.logger.warning("Tavily API key bulunamadı")
-            return None
-        
-        cache_key = f"tavily_{sorgu.lower()}_{max_results}"
-        if cache_key in self.web_cache:
-            cached = self.web_cache[cache_key]
-            if time.time() - cached["time"] < self.cache_ttl:
-                return cached["result"]
-        
-        try:
-            response = self.tavily_client.search(sorgu, include_answer=True)
-            results = []
-            
-            # Tavily'den doğrudan cevap varsa onu kullan
-            if response.get("answer"):
-                results.append(response["answer"])
-            
-            # Sonuçları ekle
-            for result in response.get("results", [])[:max_results]:
-                title = result.get("title", "")
-                content = result.get("content", "")[:300]
-                url = result.get("url", "")
-                results.append(f"{title}: {content}\n{url}")
-            
-            result_text = '\n\n'.join(results) if results else None
-            self.web_cache[cache_key] = {"result": result_text, "time": time.time()}
-            return result_text
-        except Exception as e:
-            self.logger.warning(f"Tavily arama hatası: {e}")
-            return None
 
     def web_ara_google(self, sorgu, max_results=3):
         # Cache kontrol
@@ -116,12 +94,70 @@ class AIChat(commands.Cog):
             self.logger.warning(f"Google arama hatası: {e}")
             return None
 
-    def web_ara_selenium(self, sorgu, max_results=3):
+    def web_ara_duckduckgo_tr(self, sorgu, max_results=3):
+        """DuckDuckGo TR ile arama"""
+        if not HAS_DDGS:
+            return None
+        cache_key = f"ddgs_tr_{sorgu.lower()}_{max_results}"
+        if cache_key in self.web_cache:
+            cached = self.web_cache[cache_key]
+            if time.time() - cached["time"] < self.cache_ttl:
+                return cached["result"]
         try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.common.by import By
+            with DDGS() as ddgs:
+                results_list = list(ddgs.text(sorgu, region='tr-tr', max_results=max_results))
+                if not results_list:
+                    return None
+                results = []
+                for r in results_list:
+                    title = r.get('title', '')
+                    body = r.get('body', '')[:200]
+                    href = r.get('href', '')
+                    results.append(f"{title}: {body}\n{href}")
+                result = '\n\n'.join(results)
+                self.web_cache[cache_key] = {"result": result, "time": time.time()}
+                return result
+        except Exception as e:
+            self.logger.debug(f"DuckDuckGo TR hatası: {e}")
+            return None
 
+    def web_ara_duckduckgo_global(self, sorgu, max_results=3):
+        """DuckDuckGo Global ile arama"""
+        if not HAS_DDGS:
+            return None
+        cache_key = f"ddgs_global_{sorgu.lower()}_{max_results}"
+        if cache_key in self.web_cache:
+            cached = self.web_cache[cache_key]
+            if time.time() - cached["time"] < self.cache_ttl:
+                return cached["result"]
+        try:
+            with DDGS() as ddgs:
+                results_list = list(ddgs.text(sorgu, max_results=max_results))
+                if not results_list:
+                    return None
+                results = []
+                for r in results_list:
+                    title = r.get('title', '')
+                    body = r.get('body', '')[:200]
+                    href = r.get('href', '')
+                    results.append(f"{title}: {body}\n{href}")
+                result = '\n\n'.join(results)
+                self.web_cache[cache_key] = {"result": result, "time": time.time()}
+                return result
+        except Exception as e:
+            self.logger.debug(f"DuckDuckGo Global hatası: {e}")
+            return None
+
+    def web_ara_selenium(self, sorgu, max_results=3):
+        """Selenium ile DuckDuckGo scrape"""
+        if not HAS_SELENIUM:
+            return None
+        cache_key = f"selenium_{sorgu.lower()}_{max_results}"
+        if cache_key in self.web_cache:
+            cached = self.web_cache[cache_key]
+            if time.time() - cached["time"] < self.cache_ttl:
+                return cached["result"]
+        try:
             options = Options()
             options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
@@ -132,6 +168,7 @@ class AIChat(commands.Cog):
             try:
                 url = f"https://duckduckgo.com/?q={quote_plus(sorgu)}"
                 driver.get(url)
+                time.sleep(2)  # Sayfanın yüklenmesini bekle
                 links = driver.find_elements(By.CSS_SELECTOR, "a[data-testid='result-title-a']")
                 urls = []
                 for l in links:
@@ -142,11 +179,13 @@ class AIChat(commands.Cog):
                         break
                 if not urls:
                     return None
-                return self._ozet_url_listesi(urls)
+                result = self._ozet_url_listesi(urls)
+                self.web_cache[cache_key] = {"result": result, "time": time.time()}
+                return result
             finally:
                 driver.quit()
         except Exception as e:
-            self.logger.warning(f"Selenium arama hatası: {e}")
+            self.logger.debug(f"Selenium hatası: {e}")
             return None
 
     def _ozet_url_listesi(self, urls):
@@ -166,26 +205,46 @@ class AIChat(commands.Cog):
         return "\n\n".join(results) if results else None
 
     def web_ara_birlesik(self, sorgu, max_results=3):
-        # Tavily ile ara, fallback olarak Wikipedia
-        sonuc = self.web_ara_tavily(sorgu, max_results=max_results)
+        """Web arama - Öncelik: Selenium > Google > DuckDuckGo TR > DuckDuckGo Global > Wikipedia"""
+        # 1. Selenium (DuckDuckGo scrape)
+        sonuc = self.web_ara_selenium(sorgu, max_results=max_results)
         if sonuc:
             return sonuc
+        
+        # 2. Google Search
+        sonuc = self.web_ara_google(sorgu, max_results=max_results)
+        if sonuc:
+            return sonuc
+        
+        # 3. DuckDuckGo TR
+        sonuc = self.web_ara_duckduckgo_tr(sorgu, max_results=max_results)
+        if sonuc:
+            return sonuc
+        
+        # 4. DuckDuckGo Global
+        sonuc = self.web_ara_duckduckgo_global(sorgu, max_results=max_results)
+        if sonuc:
+            return sonuc
+        
+        # 5. Wikipedia (son çare)
         sonuc = self.web_ara_wikipedia(sorgu)
         if sonuc:
             return sonuc
+        
         return None
 
     def tr_ilk_sonuclari_getir(self, sorgu, max_results=3):
-        """Tavily ile arama yap ve URL'leri döndür."""
-        if not self.tavily_client:
-            return []
-        
+        """Google Search ile arama yap ve URL'leri döndür."""
         try:
-            response = self.tavily_client.search(sorgu)
-            urls = [r.get("url") for r in response.get("results", [])[:max_results] if r.get("url")]
+            from googlesearch import search
+            urls = []
+            for url in search(sorgu, num_results=max_results, lang="tr"):
+                urls.append(url)
+                if len(urls) >= max_results:
+                    break
             return urls
         except Exception as e:
-            self.logger.debug(f"Tavily URL getirme hatası: {e}")
+            self.logger.debug(f"Google URL getirme hatası: {e}")
             return []
 
     def tr_ilk_siteden_ozet_selenium(self, sorgu):
@@ -250,65 +309,75 @@ class AIChat(commands.Cog):
         return None
 
     def kur_webden_getir(self, base="USD", target="TRY"):
-        query = f"1 {base} to {target}"
-        # Selenium ile Google (öncelikli)
+        """Güncel kur bilgisi çek - Google Finance API kullan"""
+        # 1. Google Finance API (en güncel)
         try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.common.by import By
-            options = Options()
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--window-size=1200,800")
-            driver = webdriver.Chrome(options=options)
-            try:
-                driver.set_page_load_timeout(8)
-                driver.get(f"https://www.google.com/search?q={quote_plus(query)}")
-                selectors = [
-                    "span.DFlfde",
-                    "input.a61j6"
-                ]
-                for sel in selectors:
-                    try:
-                        el = driver.find_element(By.CSS_SELECTOR, sel)
-                        val = el.get_attribute("value") or el.text
-                        if val:
-                            val = val.replace(".", "").replace(",", ".")
-                            return float(val)
-                    except Exception:
-                        continue
-
-                page = driver.page_source
-                rate = self._kur_metinden_cek(page)
-                if rate:
-                    return rate
-            finally:
-                driver.quit()
-        except Exception:
-            pass
-
-        # Bing (requests) fallback
-        try:
-            url = f"https://www.bing.com/search?q={quote_plus(query)}"
-            r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+            url = f"https://www.google.com/finance/quote/{base}-{target}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            }
+            r = requests.get(url, timeout=8, headers=headers)
             if r.status_code == 200:
-                rate = self._kur_metinden_cek(r.text)
-                if rate:
-                    return rate
-        except Exception:
-            pass
+                soup = BeautifulSoup(r.text, "lxml")
+                # Google Finance'daki fiyat elementi
+                price_div = soup.find("div", {"class": "YMlKec fxKbKc"})
+                if price_div:
+                    price_text = price_div.text.strip().replace(",", ".")
+                    try:
+                        return float(price_text)
+                    except Exception:
+                        pass
+        except Exception as e:
+            self.logger.debug(f"Google Finance hatası: {e}")
 
-        # DuckDuckGo (ddgs) fallback
-        try:
-            ddgs = DDGS()
-            for r in ddgs.text(query, region='tr-tr', safesearch='Moderate', max_results=5):
-                body = r.get('body', '') or ''
-                rate = self._kur_metinden_cek(body)
-                if rate:
-                    return rate
-        except Exception:
-            pass
+        # 2. Selenium ile Google Search (fallback)
+        if HAS_SELENIUM:
+            query = f"1 {base} to {target}"
+            try:
+                options = Options()
+                options.add_argument("--headless=new")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--window-size=1200,800")
+                driver = webdriver.Chrome(options=options)
+                try:
+                    driver.set_page_load_timeout(8)
+                    driver.get(f"https://www.google.com/search?q={quote_plus(query)}")
+                    time.sleep(1)
+                    # Google'ın kur çevirici elementleri
+                    selectors = [
+                        "span.DFlfde",
+                        "input.a61j6",
+                        "div.BNeawe.iBp4i.AP7Wnd"
+                    ]
+                    for sel in selectors:
+                        try:
+                            el = driver.find_element(By.CSS_SELECTOR, sel)
+                            val = el.get_attribute("value") or el.text
+                            if val:
+                                val = val.replace(".", "").replace(",", ".")
+                                return float(val)
+                        except Exception:
+                            continue
+                finally:
+                    driver.quit()
+            except Exception as e:
+                self.logger.debug(f"Selenium kur hatası: {e}")
+
+        # 3. DuckDuckGo fallback
+        if HAS_DDGS:
+            query = f"1 {base} to {target}"
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(query, region='tr-tr', max_results=3))
+                    for r in results:
+                        body = r.get('body', '') or ''
+                        rate = self._kur_metinden_cek(body)
+                        if rate:
+                            return rate
+            except Exception as e:
+                self.logger.debug(f"DuckDuckGo kur hatası: {e}")
+
         return None
 
     async def kur_webden_getir_async(self, base="USD", target="TRY", timeout=5):
@@ -434,11 +503,19 @@ class AIChat(commands.Cog):
                 del self.odaklanilan_kisiler[user_id]
 
         konusma_izni = False
-        if message.channel.id == aktif_kanal_id:
-            konusma_izni = True
-        elif etiketlendi or yanitlandi or odakta_mi:
-            konusma_izni = True
-            self.odaklanilan_kisiler[user_id] = current_time
+        # Eğer aktif kanal ayarlanmışsa sadece orada konuş, yoksa her kanalda etiketlendiğinde konuş
+        if aktif_kanal_id:
+            # Aktif kanal varsa sadece orada veya etiketlendiğinde
+            if message.channel.id == aktif_kanal_id:
+                konusma_izni = True
+            elif etiketlendi or yanitlandi or odakta_mi:
+                konusma_izni = True
+                self.odaklanilan_kisiler[user_id] = current_time
+        else:
+            # Aktif kanal yoksa sadece etiketlendiğinde konuş
+            if etiketlendi or yanitlandi or odakta_mi:
+                konusma_izni = True
+                self.odaklanilan_kisiler[user_id] = current_time
 
         if not konusma_izni: return
 
@@ -467,8 +544,8 @@ class AIChat(commands.Cog):
                 wiki_ozet = self.web_ara_wikipedia(user_input) if need_wiki else None
                 web_sonuclari = None
                 if not wiki_ozet and need_web:
-                    # Tavily API ile arama yap
-                    web_sonuclari = self.web_ara_tavily(user_input, max_results=3)
+                    # Web araması yap (Selenium > Google > DuckDuckGo TR > DuckDuckGo Global > Wikipedia)
+                    web_sonuclari = self.web_ara_birlesik(user_input, max_results=3)
                 
                 # Kur bilgisi AI'ya ek bilgi olarak verilecek
                 kur_bilgi = None

@@ -6,8 +6,12 @@ import random
 import os
 from utils.helpers import safe_load_json
 from utils import db
-# DÜZELTME: 'Load' yerine 'load_image_async'
-from easy_pil import Editor, Canvas, Font, load_image_async
+# easy_pil (optional)
+try:
+    from easy_pil import Editor, Canvas, Font, load_image_async
+    HAS_EASY_PIL = True
+except ImportError:
+    HAS_EASY_PIL = False
 from utils.logger import get_logger
 
 LEVELS_FILE = "levels.json"

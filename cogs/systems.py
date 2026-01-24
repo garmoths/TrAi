@@ -2,10 +2,15 @@ import discord
 from discord.ext import commands
 import json
 import datetime
-# Resim kütüphanesi
-from easy_pil import Editor, Canvas, Font, load_image_async
 from utils import db
 from utils.logger import get_logger
+
+# Pillow/easy_pil (optional)
+try:
+    from easy_pil import Editor, Canvas, Font, load_image_async
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
 
 SETTINGS_FILE = "settings.json"
 
@@ -22,6 +27,11 @@ class Systems(commands.Cog):
     # 👋 AKILLI RESİMLİ HOŞGELDİN
     @commands.Cog.listener()
     async def on_member_join(self, member):
+        # Pillow yoksa resim özelliğini kapat
+        if not HAS_PILLOW:
+            self.logger.debug("Pillow yüklü değil, welcome image devre dışı")
+            return
+        
         # 1. Panelden özellik açık mı kontrol et
         if not self.ayar_getir(member.guild.id, "hosgeldin_resmi"):
             return
