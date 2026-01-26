@@ -234,8 +234,7 @@ Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICE
 ## 📞 İletişim & Destek
 
 - 🐛 **Bug Report**: [GitHub Issues](https://github.com/garmoths/TrAi/issues)
-- 💬 **Discord**: [Destek Sunucusu](#) *(yakında)*
-- 📧 **Email**: garmoths@example.com
+
 
 ---
 
