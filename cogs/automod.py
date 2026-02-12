@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 import time
+import datetime
 from collections import defaultdict
 from utils.logger import get_logger
 from utils import db
@@ -87,7 +88,7 @@ class AutoMod(commands.Cog):
             elif self.spam_violations[user_id] >= 3:
                 try:
                     await message.author.timeout(
-                        discord.utils.utcnow() + discord.timedelta(minutes=10),
+                        discord.utils.utcnow() + datetime.timedelta(minutes=10),
                         reason="Otomatik: Spam"
                     )
                     await message.channel.send(
@@ -113,7 +114,7 @@ class AutoMod(commands.Cog):
                     
                     if self.mention_violations[user_id] >= 2:
                         await message.author.timeout(
-                            discord.utils.utcnow() + discord.timedelta(minutes=5),
+                            discord.utils.utcnow() + datetime.timedelta(minutes=5),
                             reason="Otomatik: Mass mention"
                         )
                 except:

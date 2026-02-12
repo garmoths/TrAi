@@ -6,33 +6,16 @@ from dotenv import load_dotenv
 from utils.logger import setup_logging, get_logger
 from utils import db
 
-missing_pkgs = []
-try:
-    import discord
-except ImportError:
-    missing_pkgs.append("discord.py")
-try:
-    from groq import Groq
-except ImportError:
-    missing_pkgs.append("groq")
-try:
-    from googlesearch import search
-except ImportError:
-    missing_pkgs.append("googlesearch-python")
-try:
-    import requests
-except ImportError:
-    missing_pkgs.append("requests")
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    missing_pkgs.append("beautifulsoup4")
-
-if missing_pkgs:
-    print("❌ Eksik paket(ler) tespit edildi:", ", ".join(missing_pkgs))
-    print("Lütfen aşağıdaki komutu çalıştırın ve tekrar deneyin:")
-    print("python -m pip install -r requirements.txt")
-    import sys
+# Kritik paket kontrolü
+_missing = []
+for _pkg, _imp in [("groq", "groq"), ("requests", "requests"), ("beautifulsoup4", "bs4")]:
+    try:
+        __import__(_imp)
+    except ImportError:
+        _missing.append(_pkg)
+if _missing:
+    print(f"❌ Eksik paket(ler): {', '.join(_missing)}")
+    print("Çözüm: python -m pip install -r requirements.txt")
     sys.exit(1)
 
 load_dotenv()

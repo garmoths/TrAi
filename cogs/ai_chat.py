@@ -5,6 +5,8 @@ import requests
 import os
 import re
 import asyncio
+import platform
+import shutil
 from utils.helpers import strip_emojis, is_recent_message, mark_recent_message, safe_load_json
 from utils.logger import get_logger
 import datetime
@@ -26,10 +28,18 @@ except ImportError:
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.common.by import By
     HAS_SELENIUM = True
 except ImportError:
     HAS_SELENIUM = False
+
+# chromedriver otomatik yükleme (opsiyonel)
+try:
+    import chromedriver_autoinstaller
+    HAS_CHROMEDRIVER_AUTO = True
+except ImportError:
+    HAS_CHROMEDRIVER_AUTO = False
 
 try:
     locale.setlocale(locale.LC_ALL, 'tr_TR.UTF-8')
@@ -64,14 +74,73 @@ class AIChat(commands.Cog):
         self.strip_emojis = strip_emojis
         self.web_cache = {}
         self.cache_ttl = 1800
+        self._os_name = platform.system().lower()  # 'darwin', 'windows', 'linux'
+        self.logger.info(f"İşletim sistemi algılandı: {self._os_name}")
+
+    def _chrome_options(self):
+        """İşletim sistemine göre uygun Chrome seçeneklerini oluşturur."""
+        opts = Options()
+        opts.add_argument("--headless=new")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--window-size=1200,800")
+        opts.add_argument("--disable-extensions")
+        opts.add_argument("--disable-infobars")
+
+        if self._os_name == "windows":
+            # Windows: log-level ayarla, bazı GPU hataları için
+            opts.add_argument("--log-level=3")
+            opts.add_argument("--disable-software-rasterizer")
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        elif self._os_name == "darwin":
+            # macOS
+            ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        else:
+            # Linux (sunucu/VPS)
+            opts.add_argument("--disable-setuid-sandbox")
+            opts.add_argument("--single-process")
+            ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+        opts.add_argument(f"user-agent={ua}")
+        opts.add_argument("--accept-lang=tr-TR,tr;q=0.9,en;q=0.8")
+        return opts
+
+    def _create_driver(self):
+        """İşletim sistemine uygun ChromeDriver oluşturur."""
+        opts = self._chrome_options()
+
+        # 1) chromedriver-autoinstaller varsa kullan (en güvenilir)
+        if HAS_CHROMEDRIVER_AUTO:
+            try:
+                chromedriver_autoinstaller.install()
+                return webdriver.Chrome(options=opts)
+            except Exception as e:
+                self.logger.debug(f"chromedriver-autoinstaller başarısız: {e}")
+
+        # 2) PATH'te chromedriver var mı kontrol et
+        chromedriver_path = shutil.which("chromedriver")
+        if chromedriver_path:
+            try:
+                service = Service(executable_path=chromedriver_path)
+                return webdriver.Chrome(service=service, options=opts)
+            except Exception as e:
+                self.logger.debug(f"PATH chromedriver başarısız: {e}")
+
+        # 3) Doğrudan dene (Selenium Manager otomatik bulur - Selenium 4.10+)
+        try:
+            return webdriver.Chrome(options=opts)
+        except Exception as e:
+            self.logger.warning(f"Chrome driver oluşturulamadı ({self._os_name}): {e}")
+            raise
 
     def web_ara_google(self, sorgu, max_results=3):
+        """Eski metod - geriye uyumluluk için tutuluyor ama artık _url_topla kullanılıyor."""
         cache_key = f"google_{sorgu.lower()}_{max_results}"
         if cache_key in self.web_cache:
             cached = self.web_cache[cache_key]
             if time.time() - cached["time"] < self.cache_ttl:
                 return cached["result"]
-        
         try:
             from googlesearch import search
             urls = []
@@ -149,13 +218,7 @@ class AIChat(commands.Cog):
             if time.time() - cached["time"] < self.cache_ttl:
                 return cached["result"]
         try:
-            options = Options()
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--window-size=1200,800")
-
-            driver = webdriver.Chrome(options=options)
+            driver = self._create_driver()
             try:
                 url = f"https://duckduckgo.com/?q={quote_plus(sorgu)}"
                 driver.get(url)
@@ -195,83 +258,315 @@ class AIChat(commands.Cog):
                 continue
         return "\n\n".join(results) if results else None
 
-    def web_ara_birlesik(self, sorgu, max_results=3):
-        sonuc = self.web_ara_selenium(sorgu, max_results=max_results)
-        if sonuc:
-            return sonuc
-        
-        sonuc = self.web_ara_google(sorgu, max_results=max_results)
-        if sonuc:
-            return sonuc
-        
-        sonuc = self.web_ara_duckduckgo_tr(sorgu, max_results=max_results)
-        if sonuc:
-            return sonuc
-        
-        sonuc = self.web_ara_duckduckgo_global(sorgu, max_results=max_results)
-        if sonuc:
-            return sonuc
-        
-        sonuc = self.web_ara_wikipedia(sorgu)
-        if sonuc:
-            return sonuc
-        
-        return None
-
-    def tr_ilk_sonuclari_getir(self, sorgu, max_results=3):
+    def _derin_icerik_cek(self, url, max_char=600):
+        """Bir URL'den derin içerik çeker - daha fazla paragraf ve daha uzun metin."""
         try:
-            from googlesearch import search
-            urls = []
-            for url in search(sorgu, num_results=max_results, lang="tr"):
-                urls.append(url)
-                if len(urls) >= max_results:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+                "Accept": "text/html,application/xhtml+xml"
+            }
+            r = requests.get(url, timeout=10, headers=headers)
+            if r.status_code != 200:
+                return None
+            soup = BeautifulSoup(r.text, "lxml")
+            # Gereksiz elementleri temizle
+            for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+                tag.decompose()
+            title = soup.title.text.strip() if soup.title else ""
+            # Article body varsa önce onu dene
+            article = soup.find("article") or soup.find("div", class_=re.compile(r"content|article|post|entry|main", re.I))
+            if article:
+                paragraphs = article.find_all("p")
+            else:
+                paragraphs = soup.find_all("p")
+            # Kısa paragrafları atla, anlamlı olanları al
+            texts = []
+            for p in paragraphs:
+                t = p.get_text(" ", strip=True)
+                if len(t) > 30:  # Çok kısa paragrafları atla
+                    texts.append(t)
+                if sum(len(x) for x in texts) > max_char:
                     break
-            return urls
+            full_text = " ".join(texts)
+            if len(full_text) > max_char:
+                full_text = full_text[:max_char] + "..."
+            if not full_text or len(full_text) < 50:
+                return None
+            return {"title": title, "text": full_text, "url": url}
         except Exception as e:
-            self.logger.debug(f"Google URL getirme hatası: {e}")
-            return []
-
-    def tr_ilk_siteden_ozet_selenium(self, sorgu):
-        urls = self.tr_ilk_sonuclari_getir(sorgu, max_results=1)
-        if not urls:
+            self.logger.debug(f"Derin içerik çekme hatası ({url}): {e}")
             return None
-        first_url = urls[0]
+
+    def _derin_icerik_selenium(self, url, max_char=600):
+        """Selenium ile JavaScript-rendered sayfalardan derin içerik çeker."""
+        if not HAS_SELENIUM:
+            return None
         try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-
-            options = Options()
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--window-size=1200,800")
-
-            driver = webdriver.Chrome(options=options)
+            driver = self._create_driver()
             try:
-                driver.set_page_load_timeout(5)
-                driver.get(first_url)
+                driver.set_page_load_timeout(10)
+                driver.get(url)
+                time.sleep(2)
                 html = driver.page_source
                 soup = BeautifulSoup(html, "lxml")
-                title = soup.title.text.strip() if soup.title else "Başlık"
-                text = " ".join(p.get_text(" ", strip=True) for p in soup.find_all("p")[:4])
-                snippet = text[:350] + ("..." if len(text) > 350 else "")
-                if snippet:
-                    return f"{title}: {snippet}\n{first_url}"
+                for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside"]):
+                    tag.decompose()
+                title = soup.title.text.strip() if soup.title else ""
+                article = soup.find("article") or soup.find("div", class_=re.compile(r"content|article|post|entry|main", re.I))
+                if article:
+                    paragraphs = article.find_all("p")
+                else:
+                    paragraphs = soup.find_all("p")
+                texts = []
+                for p in paragraphs:
+                    t = p.get_text(" ", strip=True)
+                    if len(t) > 30:
+                        texts.append(t)
+                    if sum(len(x) for x in texts) > max_char:
+                        break
+                full_text = " ".join(texts)
+                if len(full_text) > max_char:
+                    full_text = full_text[:max_char] + "..."
+                if not full_text or len(full_text) < 50:
+                    return None
+                return {"title": title, "text": full_text, "url": url}
             finally:
                 driver.quit()
         except Exception as e:
-            self.logger.warning(f"TR Selenium özet hatası: {e}")
-        return None
+            self.logger.debug(f"Selenium derin içerik hatası ({url}): {e}")
+            return None
 
-    async def tr_ilk_siteden_ozet_selenium_async(self, sorgu, timeout=5):
+    def _url_topla(self, sorgu, max_results=5):
+        """Birden fazla kaynaktan URL toplar ve tekilleştirir."""
+        urls_seen = set()
+        urls_ordered = []
+
+        def _ekle(url):
+            if url and url not in urls_seen:
+                urls_seen.add(url)
+                urls_ordered.append(url)
+
+        # 1) Google Search (Türkçe)
         try:
-            loop = asyncio.get_running_loop()
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, self.tr_ilk_siteden_ozet_selenium, sorgu),
-                timeout=timeout,
+            from googlesearch import search
+            for url in search(sorgu, num_results=max_results, lang="tr"):
+                _ekle(url)
+                if len(urls_ordered) >= max_results:
+                    break
+        except Exception as e:
+            self.logger.debug(f"Google URL toplama hatası: {e}")
+
+        # 2) DuckDuckGo TR
+        if len(urls_ordered) < max_results and HAS_DDGS:
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(sorgu, region='tr-tr', max_results=max_results):
+                        href = r.get('href', '')
+                        if href:
+                            _ekle(href)
+                        if len(urls_ordered) >= max_results:
+                            break
+            except Exception as e:
+                self.logger.debug(f"DDG URL toplama hatası: {e}")
+
+        # 3) DuckDuckGo Global (yedek)
+        if len(urls_ordered) < 2 and HAS_DDGS:
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(sorgu, max_results=max_results):
+                        href = r.get('href', '')
+                        if href:
+                            _ekle(href)
+                        if len(urls_ordered) >= max_results:
+                            break
+            except Exception as e:
+                self.logger.debug(f"DDG Global URL toplama hatası: {e}")
+
+        return urls_ordered[:max_results]
+
+    def _ddg_snippet_topla(self, sorgu, max_results=5):
+        """DuckDuckGo'dan snippet bilgilerini toplar (URL çekmeden hızlı özet)."""
+        snippets = []
+        if not HAS_DDGS:
+            return snippets
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.text(sorgu, region='tr-tr', max_results=max_results):
+                    title = r.get('title', '')
+                    body = r.get('body', '')
+                    href = r.get('href', '')
+                    if body and len(body) > 30:
+                        snippets.append({"title": title, "text": body, "url": href})
+        except Exception as e:
+            self.logger.debug(f"DDG snippet hatası: {e}")
+        return snippets
+
+    def _sayfa_icerikleri_cek(self, urls, max_char=600):
+        """URL listesinden derin içerik çeker. Requests başarısız olursa Selenium dener."""
+        results = []
+        for url in urls:
+            icerik = self._derin_icerik_cek(url, max_char=max_char)
+            if not icerik and HAS_SELENIUM:
+                icerik = self._derin_icerik_selenium(url, max_char=max_char)
+            if icerik:
+                results.append(icerik)
+        return results
+
+    def _birlestir_ve_formatla(self, sayfa_icerikleri, ddg_snippets, wiki_ozet=None):
+        """Tüm kaynakları birleştirip zengin bir bağlam metni oluşturur."""
+        parcalar = []
+        seen_urls = set()
+
+        # Önce derin sayfa içeriklerini ekle (en değerli)
+        for ic in sayfa_icerikleri:
+            if ic["url"] not in seen_urls:
+                seen_urls.add(ic["url"])
+                parcalar.append(f"📌 {ic['title']}\n{ic['text']}\nKaynak: {ic['url']}")
+
+        # DDG snippet'larını yedek olarak ekle (daha kısa ama hızlı)
+        for sn in ddg_snippets:
+            if sn["url"] not in seen_urls:
+                seen_urls.add(sn["url"])
+                parcalar.append(f"📎 {sn['title']}\n{sn['text']}\nKaynak: {sn['url']}")
+
+        # Wikipedia
+        if wiki_ozet:
+            parcalar.append(f"📚 Wikipedia\n{wiki_ozet}")
+
+        if not parcalar:
+            return None
+
+        return "\n\n---\n\n".join(parcalar[:5])  # En fazla 5 kaynak
+
+    async def web_ara_asamali(self, sorgu, message=None, max_results=4):
+        """
+        Aşamalı web arama: Kullanıcıya aşamaları gösterir,
+        birden fazla kaynağı birleştirir, derin içerik çeker.
+        """
+        cache_key = f"asamali_{sorgu.lower()}_{max_results}"
+        if cache_key in self.web_cache:
+            cached = self.web_cache[cache_key]
+            if time.time() - cached["time"] < self.cache_ttl:
+                return cached["result"]
+
+        loop = asyncio.get_running_loop()
+        progress_msg = None
+
+        # ═══ AŞAMA 1: URL Toplama ═══
+        try:
+            if message:
+                embed1 = discord.Embed(
+                    description="🔍 **Aşama 1/3** — Web'de aranıyor...\n`Kaynaklar bulunuyor`",
+                    color=discord.Color.blue()
+                )
+                progress_msg = await message.reply(embed=embed1)
+        except Exception:
+            pass
+
+        try:
+            urls = await asyncio.wait_for(
+                loop.run_in_executor(None, self._url_topla, sorgu, max_results),
+                timeout=12
             )
         except Exception:
-            return None
+            urls = []
+
+        try:
+            ddg_snippets = await asyncio.wait_for(
+                loop.run_in_executor(None, self._ddg_snippet_topla, sorgu, max_results),
+                timeout=8
+            )
+        except Exception:
+            ddg_snippets = []
+
+        if not urls and not ddg_snippets:
+            # Son çare: Wikipedia
+            wiki = None
+            try:
+                wiki = await loop.run_in_executor(None, self.web_ara_wikipedia, sorgu)
+            except Exception:
+                pass
+            if progress_msg:
+                try:
+                    if wiki:
+                        embed_done = discord.Embed(
+                            description="✅ **Arama tamamlandı** — Sadece Wikipedia'dan sonuç bulundu.",
+                            color=discord.Color.green()
+                        )
+                    else:
+                        embed_done = discord.Embed(
+                            description="❌ **Arama tamamlandı** — Hiçbir kaynak bulunamadı.",
+                            color=discord.Color.red()
+                        )
+                    await progress_msg.edit(embed=embed_done)
+                except Exception:
+                    pass
+            return wiki
+
+        # ═══ AŞAMA 2: Sayfaları Oku ═══
+        try:
+            if progress_msg:
+                embed2 = discord.Embed(
+                    description=f"📄 **Aşama 2/3** — {len(urls)} sayfa okunuyor...\n`İçerikler çekiliyor`",
+                    color=discord.Color.blue()
+                )
+                await progress_msg.edit(embed=embed2)
+        except Exception:
+            pass
+
+        try:
+            sayfa_icerikleri = await asyncio.wait_for(
+                loop.run_in_executor(None, self._sayfa_icerikleri_cek, urls, 600),
+                timeout=20
+            )
+        except Exception:
+            sayfa_icerikleri = []
+
+        # Wikipedia ek bilgi
+        wiki_ozet = None
+        try:
+            wiki_ozet = await loop.run_in_executor(None, self.web_ara_wikipedia, sorgu)
+        except Exception:
+            pass
+
+        # ═══ AŞAMA 3: Birleştirme ═══
+        try:
+            if progress_msg:
+                embed3 = discord.Embed(
+                    description=f"🧠 **Aşama 3/3** — Bilgiler analiz ediliyor...\n`{len(sayfa_icerikleri)} sayfa + {len(ddg_snippets)} snippet birleştiriliyor`",
+                    color=discord.Color.blue()
+                )
+                await progress_msg.edit(embed=embed3)
+        except Exception:
+            pass
+
+        sonuc = self._birlestir_ve_formatla(sayfa_icerikleri, ddg_snippets, wiki_ozet)
+
+        # İlerleme mesajını güncelle
+        try:
+            if progress_msg:
+                kaynak_sayisi = len(sayfa_icerikleri) + len(ddg_snippets) + (1 if wiki_ozet else 0)
+                embed_bitti = discord.Embed(
+                    description=f"✅ **Arama tamamlandı** — {kaynak_sayisi} kaynaktan bilgi toplandı.",
+                    color=discord.Color.green()
+                )
+                await progress_msg.edit(embed=embed_bitti)
+        except Exception:
+            pass
+
+        if sonuc:
+            self.web_cache[cache_key] = {"result": sonuc, "time": time.time()}
+        return sonuc
+
+    # Eski metodların geriye uyumluluğu için wrapper
+    def web_ara_birlesik(self, sorgu, max_results=3):
+        """Senkron wrapper - eski kodla uyumluluk için."""
+        urls = self._url_topla(sorgu, max_results=max_results)
+        ddg_snippets = self._ddg_snippet_topla(sorgu, max_results=max_results)
+        sayfa_icerikleri = self._sayfa_icerikleri_cek(urls)
+        wiki = self.web_ara_wikipedia(sorgu)
+        return self._birlestir_ve_formatla(sayfa_icerikleri, ddg_snippets, wiki)
 
     def _kur_metinden_cek(self, text):
         if not text:
@@ -314,12 +609,7 @@ class AIChat(commands.Cog):
         if HAS_SELENIUM:
             query = f"1 {base} to {target}"
             try:
-                options = Options()
-                options.add_argument("--headless=new")
-                options.add_argument("--disable-gpu")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--window-size=1200,800")
-                driver = webdriver.Chrome(options=options)
+                driver = self._create_driver()
                 try:
                     driver.set_page_load_timeout(8)
                     driver.get(f"https://www.google.com/search?q={quote_plus(query)}")
@@ -515,7 +805,10 @@ class AIChat(commands.Cog):
                 # "bugün" ve "şimdi" kaldırıldı - çok fazla false positive veriyordu
                 need_web = any(k in lu for k in [
                     "haber", "güncel", "son dakika", "webde", "internette", "site", "kaynak",
-                    "fiyat", "kur", "dolar", "euro", "altın", "borsa", "hava durumu", "yarın"
+                    "fiyat", "kur", "dolar", "euro", "altın", "borsa", "hava durumu", "yarın",
+                    "bugün", "şu an", "kaç", "ne zaman", "maç", "puan", "sonuç",
+                    "deprem", "seçim", "skor", "lig", "şampiyon", "araştır", "ara",
+                    "nüfus", "istatistik", "enflasyon", "faiz"
                 ])
                 # Wikipedia: tanım/kimdir/nedir gibi bilgi isteklerinde önce wiki
                 need_wiki = any(k in lu for k in ["nedir", "kimdir", "ne demek", "tarihçe", "biyografi"])
@@ -523,8 +816,11 @@ class AIChat(commands.Cog):
                 wiki_ozet = self.web_ara_wikipedia(user_input) if need_wiki else None
                 web_sonuclari = None
                 if not wiki_ozet and need_web:
-                    # Web araması yap (Selenium > Google > DuckDuckGo TR > DuckDuckGo Global > Wikipedia)
-                    web_sonuclari = self.web_ara_birlesik(user_input, max_results=3)
+                    # Aşamalı web arama: çoklu kaynak + ilerleme gösterir
+                    web_sonuclari = await self.web_ara_asamali(user_input, message=message, max_results=4)
+                elif need_web:
+                    # Wiki varsa yine de web'den destekle ama sessizce
+                    web_sonuclari = await self.web_ara_asamali(user_input, message=None, max_results=3)
                 
                 # Kur bilgisi AI'ya ek bilgi olarak verilecek
                 kur_bilgi = None
@@ -574,8 +870,15 @@ class AIChat(commands.Cog):
                         pass
 
                 if web_sonuclari:
-                    system_prompt += f"\n\nWEB ARAMA SONUÇLARI (güncel bilgi, özetle):\n{web_sonuclari}"
-                    system_prompt += ("\n\nKURAL: Eğer yukarıda web arama sonucu varsa, mutlaka bu sonuçlardan güncel rakamsal değeri veya cevabı doğrudan, net ve kısa şekilde kullanıcıya yaz. 'Bir döviz sitesi ziyaret et' veya 'güncel veriye ulaşamadım' gibi kaçamak cevaplar VERME. Web sonucunda rakam veya bilgi varsa onu yazmak ZORUNDASIN. Sadece web_sonuclari tamamen boşsa 'güncel veriye ulaşamadım' diyebilirsin.")
+                    system_prompt += f"\n\nWEB ARAMA SONUÇLARI (birden fazla kaynaktan toplanan güncel bilgi):\n{web_sonuclari}"
+                    system_prompt += (
+                        "\n\nKRİTİK KURAL: Yukarıdaki web arama sonuçlarından elde edilen bilgiyi mutlaka kullan."
+                        " Kullanıcının sorusuna doğrudan, net ve kısa cevap ver."
+                        " Rakamsal veri varsa (fiyat, kur, istatistik) aynen yaz."
+                        " 'Bir siteyi ziyaret et' veya 'güncel veriye ulaşamadım' gibi kaçamak cevaplar KESINLIKLE VERME."
+                        " Kaynak URL'leri de cevabının sonunda paylaş."
+                        " Eğer sonuçlarda çelişkili bilgi varsa, en güncel ve güvenilir kaynağı tercih et."
+                    )
                 if wiki_ozet:
                     system_prompt += f"\n\nWİKİPEDİ ÖZETİ:\n{wiki_ozet}"
 

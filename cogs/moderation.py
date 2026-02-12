@@ -14,6 +14,18 @@ class Moderation(commands.Cog):
         self.bot = bot
         self.logger = get_logger(__name__)
 
+    async def _log_isle(self, guild, embed):
+        """Log kanalına embed gönderir."""
+        try:
+            ayarlar = db.kv_get("settings", {}) or {}
+            kanal_id = ayarlar.get(str(guild.id), {}).get("log_kanali")
+            if kanal_id:
+                log_chan = self.bot.get_channel(kanal_id)
+                if log_chan:
+                    await log_chan.send(embed=embed)
+        except Exception:
+            self.logger.debug("Log kanalına yazılamadı")
+
     async def hiyerarsi_kontrol(self, ctx_or_msg, member):
         if isinstance(member, discord.User): return True
         author = ctx_or_msg.author if isinstance(ctx_or_msg, discord.Message) else ctx_or_msg.author
@@ -151,52 +163,105 @@ class Moderation(commands.Cog):
     @commands.has_permissions(ban_members=True)
     async def ban_komut(self, ctx, member: discord.Member, *, sebep="Yok"):
         if not await self.hiyerarsi_kontrol(ctx, member): return
-        await member.ban(reason=sebep)
-        await ctx.send(f"🔨 **{member.name}** yasaklandı.")
+        # DM gönder
+        try:
+            dm_embed = discord.Embed(
+                title=f"🔨 {ctx.guild.name} — Yasaklandınız",
+                description=f"**Sebep:** {sebep}",
+                color=discord.Color.red()
+            )
+            dm_embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+            dm_embed.timestamp = discord.utils.utcnow()
+            await member.send(embed=dm_embed)
+        except Exception:
+            pass
+        await member.ban(reason=f"{sebep} | Yetkili: {ctx.author}")
+        embed = discord.Embed(
+            title="🔨 Kullanıcı Yasaklandı",
+            description=f"{member.mention} sunucudan yasaklandı.",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Sebep", value=sebep, inline=True)
+        embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+        embed.timestamp = discord.utils.utcnow()
+        await ctx.send(embed=embed)
+        await self._log_isle(ctx.guild, embed)
 
     @commands.command(name="kick", aliases=["at"])
     @commands.has_permissions(kick_members=True)
     async def kick_komut(self, ctx, member: discord.Member, *, sebep="Yok"):
         if not await self.hiyerarsi_kontrol(ctx, member): return
-        await member.kick(reason=sebep)
-        await ctx.send(f"👢 **{member.name}** atıldı.")
+        # DM gönder
+        try:
+            dm_embed = discord.Embed(
+                title=f"👢 {ctx.guild.name} — Atıldınız",
+                description=f"**Sebep:** {sebep}",
+                color=discord.Color.orange()
+            )
+            dm_embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+            dm_embed.timestamp = discord.utils.utcnow()
+            await member.send(embed=dm_embed)
+        except Exception:
+            pass
+        await member.kick(reason=f"{sebep} | Yetkili: {ctx.author}")
+        embed = discord.Embed(
+            title="👢 Kullanıcı Atıldı",
+            description=f"{member.mention} sunucudan atıldı.",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Sebep", value=sebep, inline=True)
+        embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+        embed.timestamp = discord.utils.utcnow()
+        await ctx.send(embed=embed)
+        await self._log_isle(ctx.guild, embed)
 
     @commands.command(name="mute", aliases=["sustur"])
     @commands.has_permissions(moderate_members=True)
     async def mute_komut(self, ctx, member: discord.Member, sure: int, birim: str = "dk"):
         if not await self.hiyerarsi_kontrol(ctx, member): return
-        delta = datetime.timedelta(minutes=10)
-        if birim in ["s", "sn"]:
-            delta = datetime.timedelta(seconds=sure)
-        elif birim in ["dk", "m"]:
-            delta = datetime.timedelta(minutes=sure)
-        elif birim in ["sa", "h"]:
-            delta = datetime.timedelta(hours=sure)
+        birim_map = {"s": "seconds", "sn": "seconds", "dk": "minutes", "m": "minutes", "sa": "hours", "h": "hours"}
+        birim_adi = {"s": "saniye", "sn": "saniye", "dk": "dakika", "m": "dakika", "sa": "saat", "h": "saat"}
+        delta_key = birim_map.get(birim, "minutes")
+        delta = datetime.timedelta(**{delta_key: sure})
         await member.timeout(discord.utils.utcnow() + delta)
-        
+
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:
                 await role_mgr.susturulmuş_rol_ver(ctx.guild, member)
-                self.logger.info(f"{member.name} - Susturulmuş rolü verildi")
         except Exception as e:
             self.logger.warning(f"Susturulmuş rolü verilemedi: {e}")
-        
-        await ctx.send(f"😶 **{member.name}** susturuldu.")
 
-    @commands.command(name="unmute", aliases=["ac", "unban"])
+        birim_str = birim_adi.get(birim, "dakika")
+        embed = discord.Embed(
+            title="🔇 Kullanıcı Susturuldu",
+            description=f"{member.mention} **{sure} {birim_str}** susturuldu.",
+            color=discord.Color.dark_gold()
+        )
+        embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+        embed.timestamp = discord.utils.utcnow()
+        await ctx.send(embed=embed)
+        await self._log_isle(ctx.guild, embed)
+
+    @commands.command(name="unmute", aliases=["ac"])
     @commands.has_permissions(moderate_members=True)
     async def unmute_komut(self, ctx, member: discord.Member):
         await member.timeout(None)
-        
+
         try:
             role_mgr = self.bot.get_cog("RoleManager")
             if role_mgr:
                 await role_mgr.susturulmuş_rol_al(ctx.guild, member)
-                self.logger.info(f"{member.name} - Susturulmuş rolü alındı")
         except Exception as e:
             self.logger.warning(f"Susturulmuş rolü alınamadı: {e}")
-        await ctx.send(f"🎤 **{member.name}** konuşabilir.")
+
+        embed = discord.Embed(
+            title="🎤 Susturma Kaldırıldı",
+            description=f"{member.mention} artık konuşabilir.",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text=f"Yetkili: {ctx.author.name}")
+        await ctx.send(embed=embed)
 
     @commands.command(name="warns", aliases=["uyarlar"])
     @commands.has_permissions(manage_messages=True)
@@ -419,17 +484,23 @@ class Moderation(commands.Cog):
         if any(k in icerik for k in sustur_listesi):
             if await self.hiyerarsi_kontrol(message, hedef):
                 zaman = re.search(r'(\d+)\s*(dk|dakika|sn|saniye|sa|saat|gün)', icerik)
-                sure = 10;
-                birim = "dk"
+                sure = 10
+                birim = "dakika"
                 if zaman:
                     sure = int(zaman.group(1))
                     birim_str = zaman.group(2)
-                    if "sn" in birim_str or "s" in birim_str:
-                        delta = datetime.timedelta(seconds=sure); birim = "sn"
-                    elif "sa" in birim_str or "h" in birim_str:
-                        delta = datetime.timedelta(hours=sure); birim = "saat"
+                    if "sn" in birim_str or birim_str == "s":
+                        delta = datetime.timedelta(seconds=sure)
+                        birim = "saniye"
+                    elif "sa" in birim_str or birim_str == "h":
+                        delta = datetime.timedelta(hours=sure)
+                        birim = "saat"
+                    elif "gün" in birim_str:
+                        delta = datetime.timedelta(days=sure)
+                        birim = "gün"
                     else:
                         delta = datetime.timedelta(minutes=sure)
+                        birim = "dakika"
                 else:
                     delta = datetime.timedelta(minutes=10)
                 await hedef.timeout(discord.utils.utcnow() + delta)
