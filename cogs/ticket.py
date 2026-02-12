@@ -3,12 +3,9 @@ from discord.ext import commands
 import asyncio
 import io
 import datetime
-import json
-import os
-from utils.helpers import is_recent_message, mark_recent_message, safe_load_json
+from utils.helpers import is_recent_message, mark_recent_message
 from utils.logger import get_logger
-
-SETTINGS_FILE = "settings.json"
+from utils import db
 
 
 class Ticket(commands.Cog):
@@ -17,8 +14,8 @@ class Ticket(commands.Cog):
         self.logger = get_logger(__name__)
 
     def ayar_getir(self, guild_id):
-        data = safe_load_json(SETTINGS_FILE, {})
         try:
+            data = db.kv_get("settings", {}) or {}
             return data.get(str(guild_id), {})
         except Exception:
             self.logger.exception("Ayar getirilemedi")
@@ -152,7 +149,8 @@ class Ticket(commands.Cog):
                     f_copy = discord.File(io.BytesIO(transcript.encode("utf-8")), filename=f"{channel.name}.txt")
                     await log_ch.send(f"🎫 **{channel.name}** kapatıldı.", file=f_copy)
             except Exception as e:
-                self.logger.exception("Failed to log ticket transcript: %s", e)
+                import logging
+                logging.getLogger(__name__).exception("Failed to log ticket transcript: %s", e)
 
             await asyncio.sleep(2)
             await channel.delete()

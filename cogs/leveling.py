@@ -1,10 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import json
 import random
-import os
-from utils.helpers import safe_load_json
 from utils import db
 # easy_pil (optional)
 try:
@@ -14,8 +11,6 @@ except ImportError:
     HAS_EASY_PIL = False
 from utils.logger import get_logger
 
-LEVELS_FILE = "levels.json"
-SETTINGS_FILE = "settings.json"
 
 
 class Leveling(commands.Cog):
@@ -24,7 +19,7 @@ class Leveling(commands.Cog):
         self.logger = get_logger(__name__)
 
     def sistem_acik_mi(self, guild_id):
-        data = safe_load_json(SETTINGS_FILE, {})
+        data = db.kv_get("settings", {}) or {}
         return data.get(str(guild_id), {}).get("level_sistemi", False)
 
     def xp_islemleri(self, guild_id, user_id):
@@ -95,8 +90,9 @@ class Leveling(commands.Cog):
             self.logger.debug("Failed to load font for rank card: %s", e)
             font = None
 
-        background.text((270, 120), f"{member.name}", font=font, color="#ffffff")
-        background.text((270, 180), f"Level: {lvl}  |  XP: {xp}/{next_xp}", font=font, color="#00ffcc")
+        if font:
+            background.text((270, 120), f"{member.name}", font=font, color="#ffffff")
+            background.text((270, 180), f"Level: {lvl}  |  XP: {xp}/{next_xp}", font=font, color="#00ffcc")
 
         percentage = min((xp / next_xp) * 100, 100)
         background.bar((270, 230), max_width=600, height=30, percentage=percentage, fill="#00ffcc", radius=20)
@@ -123,12 +119,19 @@ class Leveling(commands.Cog):
             await interaction.response.send_message("❌ Henüz XP kazanmadın.", ephemeral=True)
             return
 
-        await interaction.response.defer()
-
         user_data = data[str(interaction.guild.id)][str(member.id)]
         xp = user_data["xp"]
         lvl = user_data["level"]
         next_xp = int(25 * (lvl ** 2) + 100 * lvl + 150)
+
+        if not HAS_EASY_PIL:
+            embed = discord.Embed(title="📊 Seviye Bilgisi", color=discord.Color.teal())
+            embed.add_field(name="Kullanıcı", value=member.mention)
+            embed.add_field(name="Level", value=str(lvl))
+            embed.add_field(name="XP", value=f"{xp}/{next_xp}")
+            return await interaction.response.send_message(embed=embed)
+
+        await interaction.response.defer()
 
         background = Editor(Canvas((930, 280), color="#23272a"))
         background.rectangle((20, 20), width=890, height=240, fill="#2c2f33", radius=30)
@@ -146,8 +149,9 @@ class Leveling(commands.Cog):
             self.logger.debug("Failed to load font for rank card: %s", e)
             font = None
 
-        background.text((270, 120), f"{member.name}", font=font, color="#ffffff")
-        background.text((270, 180), f"Level: {lvl}  |  XP: {xp}/{next_xp}", font=font, color="#00ffcc")
+        if font:
+            background.text((270, 120), f"{member.name}", font=font, color="#ffffff")
+            background.text((270, 180), f"Level: {lvl}  |  XP: {xp}/{next_xp}", font=font, color="#00ffcc")
 
         percentage = min((xp / next_xp) * 100, 100)
         background.bar((270, 230), max_width=600, height=30, percentage=percentage, fill="#00ffcc", radius=20)

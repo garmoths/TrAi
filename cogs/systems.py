@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import json
+import re
 import datetime
 from utils import db
 from utils.logger import get_logger
@@ -75,14 +75,17 @@ class Systems(commands.Cog):
         try:
             font_big = Font.poppins(size=50, variant="bold")
             font_small = Font.poppins(size=30, variant="regular")
-        except:
+        except Exception:
             self.logger.debug("Failed to load fonts for welcome image")
             font_big = None
             font_small = None
 
-        background.text((300, 80), "HOŞGELDİN", color="#FFFFFF", font=font_big)
-        background.text((300, 150), f"{member.name}", color="#00ffcc", font=font_big)
-        background.text((300, 220), f"Seninle {len(member.guild.members)}. kişiyiz!", color="#AAAAAA", font=font_small)
+        if font_big and font_small:
+            background.text((300, 80), "HOŞGELDİN", color="#FFFFFF", font=font_big)
+            background.text((300, 150), f"{member.name}", color="#00ffcc", font=font_big)
+            background.text((300, 220), f"Seninle {len(member.guild.members)}. kişiyiz!", color="#AAAAAA", font=font_small)
+        else:
+            self.logger.warning("Font yüklenemedi, hoşgeldin resmi yazısız gönderilecek.")
 
         file = discord.File(fp=background.image_bytes, filename="welcome.png")
         await channel.send(f"👋 Aramıza hoşgeldin {member.mention}!", file=file)
@@ -97,22 +100,25 @@ class Systems(commands.Cog):
 
         # LINK ENGEL
         if self.ayar_getir(guild_id, "link_engel"):
-            if "discord.gg" in icerik or "http" in icerik or ".com" in icerik:
+            url_pattern = re.compile(r'(https?://\S+|discord\.gg/\S+|www\.\S+)', re.IGNORECASE)
+            if url_pattern.search(message.content):
                 if message.author.guild_permissions.manage_messages: return
-                await message.delete()
-                msg = await message.channel.send(f"🚫 {message.author.mention}, reklam yasak!")
-                await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
-                await msg.delete()
+                try:
+                    await message.delete()
+                    msg = await message.channel.send(f"🚫 {message.author.mention}, reklam yasak!", delete_after=5)
+                except discord.HTTPException:
+                    pass
                 return
 
         # CAPS ENGEL
         if self.ayar_getir(guild_id, "caps_engel"):
             if len(message.content) > 6 and message.content.isupper():
                 if message.author.guild_permissions.manage_messages: return
-                await message.delete()
-                msg = await message.channel.send(f"🔠 {message.author.mention}, sakin ol şampiyon!")
-                await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
-                await msg.delete()
+                try:
+                    await message.delete()
+                    await message.channel.send(f"🔠 {message.author.mention}, sakin ol şampiyon!", delete_after=5)
+                except discord.HTTPException:
+                    pass
                 return
 
         # KÜFÜR ENGEL
